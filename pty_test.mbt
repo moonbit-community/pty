@@ -78,7 +78,7 @@ async test "idle PTY read waits instead of EOF" {
     let reader = pty.reader()
     let buf : FixedArray[Byte] = FixedArray::make(64, b'\x00')
     let result = try? @async.with_timeout(100, () => reader.read(buf))
-    inspect(result, content="Err(TimeoutError)")
+    debug_inspect(result, content="Err(TimeoutError)")
   })
 }
 
@@ -114,7 +114,7 @@ async test "wait returns child exit code" {
   @async.with_task_group(group => {
     let pty = Pty::spawn(group, ["sh", "-c", "exit 7"])
     defer pty.close()
-    inspect(pty.wait(), content="7")
+    debug_inspect(pty.wait(), content="7")
   })
 }
 
@@ -133,10 +133,10 @@ async test "spawn reports exec failure for missing program" {
     } catch {
       e => Some(e)
     }
-    inspect(
+    debug_inspect(
       err,
       content=(
-        #|Some(OSError(Pty::spawn: No such file or directory))
+        #|Some(<moonbitlang/async/os_error.OSError.OSError: ...>)
       ),
     )
   })
