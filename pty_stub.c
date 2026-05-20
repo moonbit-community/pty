@@ -30,8 +30,6 @@ typedef struct pty_handle {
   int master_fd;
   int slave_fd;
   int spawned_pid;
-  int child_pid;
-  int child_exited;
 #endif
 } pty_handle_t;
 
@@ -182,7 +180,6 @@ moonbit_pty_finalizer(void *ptr) {
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/ioctl.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 /* openpty() / login_tty() live in different headers depending on platform. */
@@ -373,22 +370,7 @@ moonbit_pty_constructor(void) {
 /* ---- platform close ----------------------------------------------------- */
 
 static void
-moonbit_pty_refresh_child_status(pty_handle_t *h) {
-  if (!h || h->child_exited || h->child_pid <= 0) {
-    return;
-  }
-
-  int status = 0;
-  pid_t ret = waitpid(h->child_pid, &status, WNOHANG);
-  if (ret == h->child_pid) {
-    h->child_exited = 1;
-    h->child_pid = -1;
-  }
-}
-
-static void
 moonbit_pty_close_impl(pty_handle_t *h) {
-  moonbit_pty_refresh_child_status(h);
   if (h->master_fd >= 0) {
     close(h->master_fd);
     h->master_fd = -1;
@@ -396,12 +378,6 @@ moonbit_pty_close_impl(pty_handle_t *h) {
   if (h->slave_fd >= 0) {
     close(h->slave_fd);
     h->slave_fd = -1;
-  }
-  if (h->child_pid > 0) {
-    kill(h->child_pid, SIGHUP);
-    int status;
-    waitpid(h->child_pid, &status, 0);
-    h->child_pid = -1;
   }
 }
 
@@ -429,8 +405,6 @@ moonbit_pty_open(int32_t cols, int32_t rows) {
   h->master_fd = master_fd;
   h->slave_fd = slave_fd;
   h->spawned_pid = -1;
-  h->child_pid = -1;
-  h->child_exited = 0;
   return moonbit_pty_make_success(h);
 }
 
@@ -458,8 +432,6 @@ moonbit_pty_set_child_pid(MoonBitPty *pty, int32_t pid) {
     return;
   }
   pty->handle->spawned_pid = (int)pid;
-  pty->handle->child_pid = (int)pid;
-  pty->handle->child_exited = 0;
 }
 
 MOONBIT_FFI_EXPORT

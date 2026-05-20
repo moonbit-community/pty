@@ -9,18 +9,22 @@ Extracted from `tonyfettes/tun-poc-server`'s `server/pty` package.
 ## API
 
 ```moonbit
-let pty = @pty.Pty::spawn(["/bin/sh", "-c", "echo hello"])
-defer pty.close()
+@async.with_task_group(group => {
+  let pty = @pty.Pty::spawn(group, ["/bin/sh", "-c", "echo hello"])
+  defer pty.close()
 
-let reader = pty.reader()                 // @raw_fd.RawFd
-pty.write(@utf8.encode("ls\n"))           // async
-pty.resize(120, 40)
-let pid : Int = pty.pid()
+  let reader = pty.reader()               // @raw_fd.RawFd
+  pty.write(@utf8.encode("ls\n"))         // async
+  pty.resize(120, 40)
+  let pid : Int = pty.pid()
+  let exit_code : Int = pty.wait()
+})
 ```
 
-`Pty::spawn` registers the master fd with the async event loop, so it must be
-called from inside an async context. `argv[0]` is resolved via `PATH`
-(`execvp`).
+`Pty::spawn` follows `moonbitlang/async/process.spawn`: it is attached to a
+task group, registers the master fd with the async event loop, and returns a
+handle that can be used while the child is running. `argv[0]` is resolved via
+`PATH` (`execvp`).
 
 ## Errors
 
@@ -31,7 +35,9 @@ to branch on specific kinds:
 
 ```moonbit
 try {
-  @pty.Pty::spawn(["/bin/missing"])
+  @async.with_task_group(group => {
+    @pty.Pty::spawn(group, ["/bin/missing"])
+  })
 } catch {
   err is @os_error.OSError if err.is_ENOENT() => ...
   err => raise err
@@ -72,7 +78,7 @@ function pointer regardless of which thread called `fork()`.
 ## Unix: the self-helper pattern
 
 On macOS and Linux, this package leaves process creation to
-`moonbitlang/async/process.spawn_orphan`. The C side only owns PTY setup and the
+`moonbitlang/async/process.spawn`. The C side only owns PTY setup and the
 constructor that runs in helper mode before `main()`.
 
 Plumbing between parent and helper uses one env var plus stdio redirection:
@@ -81,7 +87,7 @@ Plumbing between parent and helper uses one env var plus stdio redirection:
 2. The parent creates two pipes — `argv_pipe` (parent → helper) and `err_pipe`
    (helper → parent) — and a dummy pipe write end whose fd is rebound to the
    PTY slave with `dup2(slave, dummy_write.fd())`.
-3. `spawn_orphan` launches the current command with:
+3. `spawn` launches the current command inside the caller's task group with:
    - `stdin=argv_pipe.read`
    - `stdout=dummy_write` (now the PTY slave fd)
    - `stderr=err_pipe.write`

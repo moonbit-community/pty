@@ -11,6 +11,13 @@ struct Pty {
   handle : PtyHandle
   read_io : @raw_fd.RawFd
   write_io : @raw_fd.RawFd
+  process : @process.Process?
+}
+
+///|
+priv struct PtySpawn {
+  handle : PtyHandle
+  process : @process.Process?
 }
 
 ///|
@@ -32,10 +39,12 @@ const EINVAL : Int = 22
 ///
 /// Raises `@os_error.OSError` wrapping `errno` (Unix) or `GetLastError()`
 /// (Windows) if the underlying syscall fails.
-pub async fn Pty::spawn(
+pub async fn[X] Pty::spawn(
+  group : @async.TaskGroup[X],
   argv : Array[String],
   cols? : Int = 80,
   rows? : Int = 24,
+  no_wait? : Bool,
 ) -> Pty {
   if argv.is_empty() {
     raise @os_error.OSError(EINVAL, context="Pty::spawn: empty argv")
@@ -50,7 +59,8 @@ pub async fn Pty::spawn(
     buf.write_byte(b'\x00')
   }
   let argv_flat = buf.contents()
-  let handle = spawn_handle(argv_flat, cols, rows)
+  let spawned = spawn_handle(group, argv_flat, cols, rows, no_wait?)
+  let handle = spawned.handle
   let spawn_err = pty_check_spawn(handle)
   if spawn_err != 0 {
     pty_close(handle)
@@ -64,32 +74,47 @@ pub async fn Pty::spawn(
     }
   }
   let write_io = register_write_io(handle, read_io)
-  { handle, read_io, write_io }
+  { handle, read_io, write_io, process: spawned.process }
 }
 
 ///|
 #cfg(platform="windows")
-async fn spawn_handle(argv_flat : Bytes, cols : Int, rows : Int) -> PtyHandle {
-  pty_spawn_windows(argv_flat, cols, rows)
-}
-
-///|
-#cfg(not(platform="windows"))
-async fn spawn_handle(argv_flat : Bytes, cols : Int, rows : Int) -> PtyHandle {
-  spawn_handle_with_async_self(argv_flat, cols, rows)
-}
-
-///|
-#cfg(not(platform="windows"))
-async fn spawn_handle_with_async_self(
+async fn[X] spawn_handle(
+  _group : @async.TaskGroup[X],
   argv_flat : Bytes,
   cols : Int,
   rows : Int,
-) -> PtyHandle {
+  no_wait? : Bool,
+) -> PtySpawn {
+  ignore(no_wait)
+  { handle: pty_spawn_windows(argv_flat, cols, rows), process: None }
+}
+
+///|
+#cfg(not(platform="windows"))
+async fn[X] spawn_handle(
+  group : @async.TaskGroup[X],
+  argv_flat : Bytes,
+  cols : Int,
+  rows : Int,
+  no_wait? : Bool,
+) -> PtySpawn {
+  spawn_handle_with_async_self(group, argv_flat, cols, rows, no_wait?)
+}
+
+///|
+#cfg(not(platform="windows"))
+async fn[X] spawn_handle_with_async_self(
+  group : @async.TaskGroup[X],
+  argv_flat : Bytes,
+  cols : Int,
+  rows : Int,
+  no_wait? : Bool,
+) -> PtySpawn {
   let handle = pty_open(cols, rows)
   let open_err = pty_check_spawn(handle)
   if open_err != 0 {
-    return handle
+    return { handle, process: None }
   }
   let mut keep_handle = false
   defer (if !keep_handle { pty_close(handle) })
@@ -123,15 +148,17 @@ async fn spawn_handle_with_async_self(
     arg_index += 1
   }
 
-  let child_pid = @process.spawn_orphan(
+  let child = @process.spawn(
+    group,
     self_cmd,
     self_args,
     stdin=argv_read,
     stdout=slave_write,
     stderr=err_write,
     extra_env={ "MOONBIT_PTY_EXEC": "stdio" },
+    no_wait?,
   )
-  pty_set_child_pid(handle, child_pid)
+  pty_set_child_pid(handle, child.pid)
 
   argv_read.close()
   err_write.close()
@@ -144,14 +171,14 @@ async fn spawn_handle_with_async_self(
   let child_err = pty_decode_child_error(err_read.read_all().binary())
   err_read.close()
   if child_err != 0 {
-    return pty_failure(child_err)
+    return { handle: pty_failure(child_err), process: Some(child) }
   }
   match argv_write_result {
     Ok(_) => ()
     Err(err) => raise err
   }
   keep_handle = true
-  handle
+  { handle, process: Some(child) }
 }
 
 ///|
@@ -232,6 +259,27 @@ pub fn Pty::pid(self : Pty) -> Int {
 }
 
 ///|
+/// Wait for the spawned child process to exit and return its exit code.
+///
+/// This is backed by `moonbitlang/async/process`, so waiting/reaping lives
+/// in the async process layer rather than in `Pty::close`.
+pub async fn Pty::wait(self : Pty) -> Int {
+  match self.process {
+    Some(process) => process.wait()
+    None => -1
+  }
+}
+
+///|
+/// Request cancellation of the child process.
+pub fn Pty::cancel(self : Pty) -> Unit {
+  match self.process {
+    Some(process) => process.cancel()
+    None => ()
+  }
+}
+
+///|
 /// Close the PTY, releasing all resources.
 ///
 /// Closes the owned `RawFd` wrapper(s) and then tears down the underlying
@@ -241,6 +289,7 @@ pub fn Pty::pid(self : Pty) -> Int {
 /// idempotent.
 #cfg(not(platform="windows"))
 pub fn Pty::close(self : Pty) -> Unit {
+  self.cancel()
   self.read_io.close()
   pty_close(self.handle)
 }
@@ -255,6 +304,7 @@ pub fn Pty::close(self : Pty) -> Unit {
 /// idempotent.
 #cfg(platform="windows")
 pub fn Pty::close(self : Pty) -> Unit {
+  self.cancel()
   self.read_io.close()
   self.write_io.close()
   pty_close(self.handle)

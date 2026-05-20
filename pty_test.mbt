@@ -40,38 +40,46 @@ async fn read_until_contains(
 ///|
 #cfg(not(platform="windows"))
 async test "spawn succeeds and reports a child pid" {
-  let pty = Pty::spawn(["/bin/sh"])
-  defer pty.close()
-  assert_true(pty.pid() > 0)
+  @async.with_task_group(group => {
+    let pty = Pty::spawn(group, ["/bin/sh"])
+    defer pty.close()
+    assert_true(pty.pid() > 0)
+  })
 }
 
 ///|
 #cfg(not(platform="windows"))
 async test "cat echoes input through PTY" {
-  let pty = Pty::spawn(["/bin/cat"])
-  defer pty.close()
-  pty.write(@utf8.encode("ping\n"))
-  assert_true(read_until_contains(pty, "ping") is Some(_))
+  @async.with_task_group(group => {
+    let pty = Pty::spawn(group, ["/bin/cat"])
+    defer pty.close()
+    pty.write(@utf8.encode("ping\n"))
+    assert_true(read_until_contains(pty, "ping") is Some(_))
+  })
 }
 
 ///|
 #cfg(not(platform="windows"))
 async test "sh accepts commands through PTY" {
-  let pty = Pty::spawn(["/bin/sh"])
-  defer pty.close()
-  pty.write(@utf8.encode("echo READY\nexit\n"))
-  assert_true(read_until_contains(pty, "READY") is Some(_))
+  @async.with_task_group(group => {
+    let pty = Pty::spawn(group, ["/bin/sh"])
+    defer pty.close()
+    pty.write(@utf8.encode("echo READY\nexit\n"))
+    assert_true(read_until_contains(pty, "READY") is Some(_))
+  })
 }
 
 ///|
 #cfg(not(platform="windows"))
 async test "idle PTY read waits instead of EOF" {
-  let pty = Pty::spawn(["/bin/cat"])
-  defer pty.close()
-  let reader = pty.reader()
-  let buf : FixedArray[Byte] = FixedArray::make(64, b'\x00')
-  let result = try? @async.with_timeout(100, () => reader.read(buf))
-  inspect(result, content="Err(TimeoutError)")
+  @async.with_task_group(group => {
+    let pty = Pty::spawn(group, ["/bin/cat"])
+    defer pty.close()
+    let reader = pty.reader()
+    let buf : FixedArray[Byte] = FixedArray::make(64, b'\x00')
+    let result = try? @async.with_timeout(100, () => reader.read(buf))
+    inspect(result, content="Err(TimeoutError)")
+  })
 }
 
 ///|
@@ -81,9 +89,11 @@ async test "idle PTY read waits instead of EOF" {
 /// second one as a command.
 #cfg(not(platform="windows"))
 async test "spawn forwards argv beyond argv[0]" {
-  let pty = Pty::spawn(["/bin/sh", "-c", "echo ARGV_OK"])
-  defer pty.close()
-  assert_true(read_until_contains(pty, "ARGV_OK") is Some(_))
+  @async.with_task_group(group => {
+    let pty = Pty::spawn(group, ["/bin/sh", "-c", "echo ARGV_OK"])
+    defer pty.close()
+    assert_true(read_until_contains(pty, "ARGV_OK") is Some(_))
+  })
 }
 
 ///|
@@ -91,9 +101,21 @@ async test "spawn forwards argv beyond argv[0]" {
 /// PATH lookup we're adding — `execvp` must resolve `sh` via $PATH.
 #cfg(not(platform="windows"))
 async test "spawn resolves program via PATH" {
-  let pty = Pty::spawn(["sh", "-c", "echo PATH_OK"])
-  defer pty.close()
-  assert_true(read_until_contains(pty, "PATH_OK") is Some(_))
+  @async.with_task_group(group => {
+    let pty = Pty::spawn(group, ["sh", "-c", "echo PATH_OK"])
+    defer pty.close()
+    assert_true(read_until_contains(pty, "PATH_OK") is Some(_))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "wait returns child exit code" {
+  @async.with_task_group(group => {
+    let pty = Pty::spawn(group, ["sh", "-c", "exit 7"])
+    defer pty.close()
+    inspect(pty.wait(), content="7")
+  })
 }
 
 ///|
@@ -103,17 +125,19 @@ async test "spawn resolves program via PATH" {
 /// helper (macOS) / post-fork exec path (Linux).
 #cfg(not(platform="windows"))
 async test "spawn reports exec failure for missing program" {
-  let err = try {
-    let pty = Pty::spawn(["/nonexistent/program/xyzzy"])
-    pty.close()
-    None
-  } catch {
-    e => Some(e)
-  }
-  inspect(
-    err,
-    content=(
-      #|Some(OSError(Pty::spawn: No such file or directory))
-    ),
-  )
+  @async.with_task_group(group => {
+    let err = try {
+      let pty = Pty::spawn(group, ["/nonexistent/program/xyzzy"])
+      pty.close()
+      None
+    } catch {
+      e => Some(e)
+    }
+    inspect(
+      err,
+      content=(
+        #|Some(OSError(Pty::spawn: No such file or directory))
+      ),
+    )
+  })
 }
