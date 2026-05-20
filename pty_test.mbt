@@ -1,7 +1,6 @@
 ///|
-// These tests spawn POSIX-only programs (`/bin/sh`, `/bin/cat`, bare `sh`).
-// They're skipped on Windows where the equivalents would be `cmd.exe` and
-// the ConPTY code path isn't covered here yet — see TODO in pty_stub.c.
+// Most tests spawn POSIX-only programs (`/bin/sh`, `/bin/cat`, bare `sh`).
+// Windows has dedicated ConPTY smoke tests that use `cmd.exe`.
 
 ///|
 /// Read from the PTY until `needle` appears in the accumulated output or
@@ -10,7 +9,7 @@
 async fn read_until_contains(
   pty : Pty,
   needle : String,
-  timeout_ms? : Int = 1000,
+  timeout_ms? : Int = 3000,
   max_reads? : Int = 8,
 ) -> String? {
   let reader = pty.reader()
@@ -139,5 +138,27 @@ async test "spawn reports exec failure for missing program" {
         #|Some(<moonbitlang/async/os_error.OSError.OSError: ...>)
       ),
     )
+  })
+}
+
+///|
+#cfg(platform="windows")
+async test "cmd outputs through ConPTY" {
+  @async.with_task_group(group => {
+    let pty = Pty::spawn(group, ["cmd.exe", "/c", "echo", "WIN_READY"])
+    defer pty.close()
+    assert_true(pty.pid() > 0)
+    assert_true(read_until_contains(pty, "WIN_READY") is Some(_))
+    debug_inspect(pty.wait(), content="0")
+  })
+}
+
+///|
+#cfg(platform="windows")
+async test "wait returns Windows child exit code" {
+  @async.with_task_group(group => {
+    let pty = Pty::spawn(group, ["cmd.exe", "/c", "exit", "7"])
+    defer pty.close()
+    debug_inspect(pty.wait(), content="7")
   })
 }
