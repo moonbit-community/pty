@@ -41,8 +41,8 @@ jobs:
       - name: Version
         run: moon version
 
-      - name: Install dependencies
-        run: moon install
+      - name: Update registry index
+        run: moon update
 
       - name: Check
         run: moon check
