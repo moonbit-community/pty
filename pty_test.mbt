@@ -113,7 +113,7 @@ async test "spawn reports exec failure for missing program" {
   inspect(
     err,
     content=(
-      #|Some(OSError("Pty::spawn: No such file or directory"))
+      #|Some(OSError(Pty::spawn: No such file or directory))
     ),
   )
 }

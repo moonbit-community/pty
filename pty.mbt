@@ -50,7 +50,7 @@ pub async fn Pty::spawn(
     buf.write_byte(b'\x00')
   }
   let argv_flat = buf.contents()
-  let handle = pty_spawn(argv_flat, cols, rows)
+  let handle = spawn_handle(argv_flat, cols, rows)
   let spawn_err = pty_check_spawn(handle)
   if spawn_err != 0 {
     pty_close(handle)
@@ -65,6 +65,93 @@ pub async fn Pty::spawn(
   }
   let write_io = register_write_io(handle, read_io)
   { handle, read_io, write_io }
+}
+
+///|
+#cfg(platform="windows")
+async fn spawn_handle(argv_flat : Bytes, cols : Int, rows : Int) -> PtyHandle {
+  pty_spawn_windows(argv_flat, cols, rows)
+}
+
+///|
+#cfg(not(platform="windows"))
+async fn spawn_handle(argv_flat : Bytes, cols : Int, rows : Int) -> PtyHandle {
+  spawn_handle_with_async_self(argv_flat, cols, rows)
+}
+
+///|
+#cfg(not(platform="windows"))
+async fn spawn_handle_with_async_self(
+  argv_flat : Bytes,
+  cols : Int,
+  rows : Int,
+) -> PtyHandle {
+  let handle = pty_open(cols, rows)
+  let open_err = pty_check_spawn(handle)
+  if open_err != 0 {
+    return handle
+  }
+  let mut keep_handle = false
+  defer (if !keep_handle { pty_close(handle) })
+  let (argv_read, argv_write) = @pipe.pipe()
+  defer argv_read.close()
+  defer argv_write.close()
+  let (err_read, err_write) = @pipe.pipe()
+  defer err_read.close()
+  defer err_write.close()
+  let (slave_read, slave_write) = @pipe.pipe()
+  defer slave_read.close()
+  defer slave_write.close()
+
+  let bind_err = pty_bind_slave_to_fd(handle, slave_write.fd())
+  if bind_err != 0 {
+    raise @os_error.OSError(bind_err, context="Pty::spawn: bind slave")
+  }
+
+  let self_cmd = @os.executable() catch {
+    _ => raise @os_error.OSError(EINVAL, context="Pty::spawn: self executable")
+  }
+  if self_cmd.is_empty() {
+    raise @os_error.OSError(EINVAL, context="Pty::spawn: self executable")
+  }
+  let self_args : Array[String] = []
+  let mut arg_index = 0
+  for arg in @os.args() {
+    if arg_index > 0 {
+      self_args.push(arg)
+    }
+    arg_index += 1
+  }
+
+  let child_pid = @process.spawn_orphan(
+    self_cmd,
+    self_args,
+    stdin=argv_read,
+    stdout=slave_write,
+    stderr=err_write,
+    extra_env={ "MOONBIT_PTY_EXEC": "stdio" },
+  )
+  pty_set_child_pid(handle, child_pid)
+
+  argv_read.close()
+  err_write.close()
+  slave_read.close()
+  slave_write.close()
+
+  let argv_write_result = try? argv_write.write(argv_flat)
+  argv_write.close()
+
+  let child_err = pty_decode_child_error(err_read.read_all().binary())
+  err_read.close()
+  if child_err != 0 {
+    return pty_failure(child_err)
+  }
+  match argv_write_result {
+    Ok(_) => ()
+    Err(err) => raise err
+  }
+  keep_handle = true
+  handle
 }
 
 ///|
@@ -84,7 +171,7 @@ fn register_write_io(
   handle : PtyHandle,
   read_io : @raw_fd.RawFd,
 ) -> @raw_fd.RawFd {
-  @raw_fd.RawFd::new(pty_take_write_fd(handle)) catch {
+  @raw_fd.RawFd::new(pty_take_write_fd_windows(handle)) catch {
     err => {
       read_io.close()
       pty_close(handle)
