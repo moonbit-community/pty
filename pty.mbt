@@ -224,7 +224,7 @@ fn register_write_io(
 ///|
 /// On Windows ConPTY has a separate input pipe HANDLE.
 #cfg(platform="windows")
-fn register_write_io(
+async fn register_write_io(
   handle : PtyHandle,
   read_io : @raw_fd.RawFd,
 ) -> @raw_fd.RawFd {
