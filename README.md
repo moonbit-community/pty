@@ -106,9 +106,9 @@ Plumbing between parent and helper uses one env var plus stdio redirection:
 
 ### Why argv must be copied
 
-The parent also re-spawns with its own executable path and `argv` from
-`tonyfettes/os` as helper-process arguments (separate from the target argv
-that gets streamed through the pipe).
+The parent also re-spawns with its own executable path and original OS `argv`
+as helper-process arguments (separate from the target argv that gets streamed
+through the pipe).
 This is **required** because in MoonBit debug mode, the current executable can
 be `tcc` (MoonBit's native runner), not the test/application binary.
 Re-spawning `tcc` without the original arguments means it doesn't know which

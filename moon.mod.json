@@ -2,8 +2,7 @@
   "name": "tonyfettes/pty",
   "version": "0.1.0",
   "deps": {
-    "moonbitlang/async": "0.18.0",
-    "tonyfettes/os": "0.1.1"
+    "moonbitlang/async": "0.18.0"
   },
   "readme": "README.md",
   "repository": "https://github.com/moonbit-community/tonyfettes-pty",

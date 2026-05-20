@@ -10,6 +10,7 @@
  */
 
 #include <moonbit.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -190,6 +191,8 @@ moonbit_pty_finalizer(void *ptr) {
 
 /* openpty() / login_tty() live in different headers depending on platform. */
 #if defined(__APPLE__)
+#include <crt_externs.h>
+#include <mach-o/dyld.h>
 #include <util.h>
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
 #include <libutil.h>
@@ -210,6 +213,67 @@ moonbit_pty_set_nonblocking(int fd) {
   if (flags >= 0) {
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
   }
+}
+
+static moonbit_bytes_t
+moonbit_pty_empty_bytes(void) {
+  return moonbit_make_bytes(0, 0);
+}
+
+static moonbit_bytes_t
+moonbit_pty_copy_bytes(const void *data, size_t len) {
+  if (!data || len > INT32_MAX) {
+    return moonbit_pty_empty_bytes();
+  }
+  moonbit_bytes_t out = moonbit_make_bytes((int32_t)len, 0);
+  if (len > 0) {
+    memcpy(out, data, len);
+  }
+  return out;
+}
+
+MOONBIT_FFI_EXPORT
+moonbit_bytes_t
+moonbit_pty_self_executable(void) {
+#if defined(__APPLE__)
+  uint32_t size = 0;
+  if (_NSGetExecutablePath(NULL, &size) != -1 || size == 0) {
+    return moonbit_pty_empty_bytes();
+  }
+  char *path = (char *)malloc((size_t)size);
+  if (!path) {
+    return moonbit_pty_empty_bytes();
+  }
+  if (_NSGetExecutablePath(path, &size) != 0) {
+    free(path);
+    return moonbit_pty_empty_bytes();
+  }
+  moonbit_bytes_t out = moonbit_pty_copy_bytes(path, strlen(path));
+  free(path);
+  return out;
+#elif defined(__linux__)
+  size_t cap = 256;
+  for (;;) {
+    char *path = (char *)malloc(cap);
+    if (!path) {
+      return moonbit_pty_empty_bytes();
+    }
+    ssize_t n = readlink("/proc/self/exe", path, cap);
+    if (n < 0) {
+      free(path);
+      return moonbit_pty_empty_bytes();
+    }
+    if ((size_t)n < cap) {
+      moonbit_bytes_t out = moonbit_pty_copy_bytes(path, (size_t)n);
+      free(path);
+      return out;
+    }
+    free(path);
+    cap *= 2;
+  }
+#else
+  return moonbit_pty_empty_bytes();
+#endif
 }
 
 /* Blocking write of exactly `len` bytes of `errno` back to the parent.
@@ -280,6 +344,62 @@ moonbit_pty_read_argv_buf(int argv_fd, char **out_buf, size_t *out_len) {
   *out_buf = buf;
   *out_len = len;
   return 0;
+}
+
+MOONBIT_FFI_EXPORT
+moonbit_bytes_t
+moonbit_pty_self_args_flat(void) {
+#if defined(__APPLE__)
+  int argc = *_NSGetArgc();
+  char **argv = *_NSGetArgv();
+  if (argc <= 0 || !argv) {
+    return moonbit_pty_empty_bytes();
+  }
+  size_t total = 0;
+  for (int i = 0; i < argc; i++) {
+    if (!argv[i]) {
+      return moonbit_pty_empty_bytes();
+    }
+    total += strlen(argv[i]) + 1;
+  }
+  if (total > INT32_MAX) {
+    return moonbit_pty_empty_bytes();
+  }
+  moonbit_bytes_t out = moonbit_make_bytes((int32_t)total, 0);
+  size_t pos = 0;
+  for (int i = 0; i < argc; i++) {
+    size_t len = strlen(argv[i]);
+    memcpy(out + pos, argv[i], len);
+    pos += len + 1;
+  }
+  return out;
+#elif defined(__linux__)
+  int fd = open("/proc/self/cmdline", O_RDONLY);
+  if (fd < 0) {
+    return moonbit_pty_empty_bytes();
+  }
+  char *buf = NULL;
+  size_t len = 0;
+  int err = moonbit_pty_read_argv_buf(fd, &buf, &len);
+  close(fd);
+  if (err != 0 || !buf) {
+    return moonbit_pty_empty_bytes();
+  }
+  if (len == 0 || buf[len - 1] != '\0') {
+    char *new_buf = (char *)realloc(buf, len + 1);
+    if (!new_buf) {
+      free(buf);
+      return moonbit_pty_empty_bytes();
+    }
+    buf = new_buf;
+    buf[len++] = '\0';
+  }
+  moonbit_bytes_t out = moonbit_pty_copy_bytes(buf, len);
+  free(buf);
+  return out;
+#else
+  return moonbit_pty_empty_bytes();
+#endif
 }
 
 /* Split the flat argv buffer in-place into a NULL-terminated argv array.

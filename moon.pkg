@@ -2,13 +2,11 @@ import {
   "moonbitlang/async",
   "moonbitlang/core/buffer",
   "moonbitlang/core/encoding/utf8",
-  "moonbitlang/async/io",
   "moonbitlang/async/pipe",
   "moonbitlang/async/process",
   "moonbitlang/async/raw_fd",
   "moonbitlang/async/types",
   "moonbitlang/async/os_error",
-  "tonyfettes/os",
 }
 
 supported_targets = "native"

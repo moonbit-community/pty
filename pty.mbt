@@ -87,7 +87,7 @@ pub async fn[X] Pty::spawn(
 
 ///|
 #cfg(platform="windows")
-async fn[X] spawn_handle(
+fn[X] spawn_handle(
   group : @async.TaskGroup[X],
   argv_flat : Bytes,
   cols : Int,
@@ -159,20 +159,11 @@ async fn[X] spawn_handle_with_async_self(
     raise @os_error.OSError(bind_err, context="Pty::spawn: bind slave")
   }
 
-  let self_cmd = @os.executable() catch {
-    _ => raise @os_error.OSError(EINVAL, context="Pty::spawn: self executable")
-  }
+  let self_cmd = @utf8.decode_lossy(pty_self_executable())
   if self_cmd.is_empty() {
     raise @os_error.OSError(EINVAL, context="Pty::spawn: self executable")
   }
-  let self_args : Array[String] = []
-  let mut arg_index = 0
-  for arg in @os.args() {
-    if arg_index > 0 {
-      self_args.push(arg)
-    }
-    arg_index += 1
-  }
+  let self_args = parse_self_args(pty_self_args_flat())
 
   let child = @process.spawn(
     group,
@@ -209,6 +200,24 @@ async fn[X] spawn_handle_with_async_self(
   }
   keep_handle = true
   { handle, process: Some(child), wait_task: None }
+}
+
+///|
+#cfg(not(platform="windows"))
+fn parse_self_args(flat : Bytes) -> Array[String] {
+  let args : Array[String] = []
+  let mut start = 0
+  let mut index = 0
+  for i in 0..<flat.length() {
+    if flat[i] == b'\x00' {
+      if index > 0 {
+        args.push(@utf8.decode_lossy(flat[start:i]))
+      }
+      index += 1
+      start = i + 1
+    }
+  }
+  args
 }
 
 ///|
