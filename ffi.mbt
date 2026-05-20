@@ -53,6 +53,10 @@ extern "c" fn pty_take_read_fd(handle : PtyHandle) -> @types.Fd = "moonbit_pty_t
 extern "c" fn pty_take_write_fd_windows(handle : PtyHandle) -> @types.Fd = "moonbit_pty_take_write_fd_windows"
 
 ///|
+#cfg(platform="windows")
+extern "c" fn pty_kill_pid_windows(pid : Int) -> Unit = "moonbit_pty_kill_pid_windows"
+
+///|
 #borrow(handle)
 extern "c" fn pty_child_pid(handle : PtyHandle) -> Int = "moonbit_pty_child_pid"
 

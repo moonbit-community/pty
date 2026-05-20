@@ -789,6 +789,20 @@ fail:
   return moonbit_pty_make_failure(saved_err);
 }
 
+MOONBIT_FFI_EXPORT
+void
+moonbit_pty_kill_pid_windows(int32_t pid) {
+  if (pid <= 0) {
+    return;
+  }
+  HANDLE process = OpenProcess(PROCESS_TERMINATE, FALSE, (DWORD)pid);
+  if (!process || process == INVALID_HANDLE_VALUE) {
+    return;
+  }
+  TerminateProcess(process, 1);
+  CloseHandle(process);
+}
+
 /* ---- resize ------------------------------------------------------------- */
 
 MOONBIT_FFI_EXPORT

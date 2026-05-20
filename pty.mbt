@@ -12,12 +12,14 @@ struct Pty {
   read_io : @raw_fd.RawFd
   write_io : @raw_fd.RawFd
   process : @process.Process?
+  wait_task : @async.Task[Int]?
 }
 
 ///|
 priv struct PtySpawn {
   handle : PtyHandle
   process : @process.Process?
+  wait_task : @async.Task[Int]?
 }
 
 ///|
@@ -74,20 +76,44 @@ pub async fn[X] Pty::spawn(
     }
   }
   let write_io = register_write_io(handle, read_io)
-  { handle, read_io, write_io, process: spawned.process }
+  {
+    handle,
+    read_io,
+    write_io,
+    process: spawned.process,
+    wait_task: spawned.wait_task,
+  }
 }
 
 ///|
 #cfg(platform="windows")
 async fn[X] spawn_handle(
-  _group : @async.TaskGroup[X],
+  group : @async.TaskGroup[X],
   argv_flat : Bytes,
   cols : Int,
   rows : Int,
   no_wait? : Bool,
 ) -> PtySpawn {
-  ignore(no_wait)
-  { handle: pty_spawn_windows(argv_flat, cols, rows), process: None }
+  let handle = pty_spawn_windows(argv_flat, cols, rows)
+  let spawn_err = pty_check_spawn(handle)
+  if spawn_err != 0 {
+    return { handle, process: None, wait_task: None }
+  }
+  let pid = pty_child_pid(handle)
+  if pid <= 0 {
+    return { handle, process: None, wait_task: None }
+  }
+  let wait_task = group.spawn(no_wait?, () => {
+    @process.wait_pid(pid) catch {
+      _ if @async.is_being_cancelled() =>
+        @async.protect_from_cancel(() => {
+          pty_kill_pid_windows(pid)
+          @process.wait_pid(pid)
+        })
+      err => raise err
+    }
+  })
+  { handle, process: None, wait_task: Some(wait_task) }
 }
 
 ///|
@@ -114,7 +140,7 @@ async fn[X] spawn_handle_with_async_self(
   let handle = pty_open(cols, rows)
   let open_err = pty_check_spawn(handle)
   if open_err != 0 {
-    return { handle, process: None }
+    return { handle, process: None, wait_task: None }
   }
   let mut keep_handle = false
   defer (if !keep_handle { pty_close(handle) })
@@ -171,14 +197,18 @@ async fn[X] spawn_handle_with_async_self(
   let child_err = pty_decode_child_error(err_read.read_all().binary())
   err_read.close()
   if child_err != 0 {
-    return { handle: pty_failure(child_err), process: Some(child) }
+    return {
+      handle: pty_failure(child_err),
+      process: Some(child),
+      wait_task: None,
+    }
   }
   match argv_write_result {
     Ok(_) => ()
     Err(err) => raise err
   }
   keep_handle = true
-  { handle, process: Some(child) }
+  { handle, process: Some(child), wait_task: None }
 }
 
 ///|
@@ -266,16 +296,31 @@ pub fn Pty::pid(self : Pty) -> Int {
 pub async fn Pty::wait(self : Pty) -> Int {
   match self.process {
     Some(process) => process.wait()
-    None => -1
+    None =>
+      match self.wait_task {
+        Some(task) => task.wait()
+        None => -1
+      }
   }
 }
 
 ///|
 /// Request cancellation of the child process.
+#cfg(not(platform="windows"))
 pub fn Pty::cancel(self : Pty) -> Unit {
   match self.process {
     Some(process) => process.cancel()
     None => ()
+  }
+}
+
+///|
+/// Request cancellation of the child process.
+#cfg(platform="windows")
+pub fn Pty::cancel(self : Pty) -> Unit {
+  let pid = pty_child_pid(self.handle)
+  if pid > 0 {
+    pty_kill_pid_windows(pid)
   }
 }
 
