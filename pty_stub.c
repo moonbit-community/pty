@@ -36,15 +36,15 @@ typedef struct pty_handle {
 /*
  * MoonBitPty is the external-object wrapper seen by MoonBit.
  * moonbit_make_external_object allocates (payload_size) bytes after
- * the GC header; our payload is (pty_handle_t *, spawn_errno).
+ * the GC header; our payload is (pty_handle_t, spawn_errno).
  *
  * `spawn_errno` is 0 on success, otherwise the errno / GetLastError
  * captured while creating the PTY or process. On failure, `handle` is
- * NULL, but the MoonBitPty object itself is still valid so MoonBit can
- * call moonbit_pty_check_spawn / moonbit_pty_close on it.
+ * initialized to inert fd/HANDLE values so MoonBit can still call
+ * moonbit_pty_check_spawn / moonbit_pty_close on it.
  */
 typedef struct {
-  pty_handle_t *handle;
+  pty_handle_t handle;
   int32_t spawn_errno;
 } MoonBitPty;
 
@@ -54,7 +54,17 @@ moonbit_pty_close_impl(pty_handle_t *h);
 static void
 moonbit_pty_finalizer(void *ptr);
 
-/* Allocate a MoonBitPty representing a failed spawn. `handle` stays NULL;
+static void
+moonbit_pty_init_handle(pty_handle_t *h) {
+  memset(h, 0, sizeof(*h));
+#ifndef _WIN32
+  h->master_fd = -1;
+  h->slave_fd = -1;
+  h->spawned_pid = -1;
+#endif
+}
+
+/* Allocate a MoonBitPty representing a failed spawn. `handle` stays inert;
  * `err` stores the captured OS error (errno on Unix, GetLastError on
  * Windows) so MoonBit can report it via moonbit_pty_check_spawn. */
 static MoonBitPty *
@@ -62,18 +72,18 @@ moonbit_pty_make_failure(int32_t err) {
   MoonBitPty *pty = (MoonBitPty *)moonbit_make_external_object(
     moonbit_pty_finalizer, sizeof(MoonBitPty)
   );
-  pty->handle = NULL;
+  moonbit_pty_init_handle(&pty->handle);
   pty->spawn_errno = err;
   return pty;
 }
 
 /* Allocate a MoonBitPty wrapping a successfully-initialized handle. */
 static MoonBitPty *
-moonbit_pty_make_success(pty_handle_t *h) {
+moonbit_pty_make_success(const pty_handle_t *h) {
   MoonBitPty *pty = (MoonBitPty *)moonbit_make_external_object(
     moonbit_pty_finalizer, sizeof(MoonBitPty)
   );
-  pty->handle = h;
+  pty->handle = *h;
   pty->spawn_errno = 0;
   return pty;
 }
@@ -164,11 +174,7 @@ moonbit_pty_free_argv(char **argv) {
 static void
 moonbit_pty_finalizer(void *ptr) {
   MoonBitPty *pty = (MoonBitPty *)ptr;
-  if (pty->handle) {
-    moonbit_pty_close_impl(pty->handle);
-    free(pty->handle);
-    pty->handle = NULL;
-  }
+  moonbit_pty_close_impl(&pty->handle);
 }
 
 /* ========================================================================== */
@@ -379,6 +385,7 @@ moonbit_pty_close_impl(pty_handle_t *h) {
     close(h->slave_fd);
     h->slave_fd = -1;
   }
+  h->spawned_pid = -1;
 }
 
 MOONBIT_FFI_EXPORT
@@ -396,42 +403,37 @@ moonbit_pty_open(int32_t cols, int32_t rows) {
   }
   moonbit_pty_set_nonblocking(master_fd);
 
-  pty_handle_t *h = (pty_handle_t *)calloc(1, sizeof(pty_handle_t));
-  if (!h) {
-    close(master_fd);
-    close(slave_fd);
-    return moonbit_pty_make_failure((int32_t)ENOMEM);
-  }
-  h->master_fd = master_fd;
-  h->slave_fd = slave_fd;
-  h->spawned_pid = -1;
-  return moonbit_pty_make_success(h);
+  pty_handle_t h;
+  moonbit_pty_init_handle(&h);
+  h.master_fd = master_fd;
+  h.slave_fd = slave_fd;
+  return moonbit_pty_make_success(&h);
 }
 
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_bind_slave_to_fd(MoonBitPty *pty, int32_t target_fd) {
-  if (!pty || !pty->handle || pty->handle->slave_fd < 0 || target_fd < 0) {
+  if (!pty || pty->handle.slave_fd < 0 || target_fd < 0) {
     return (int32_t)EINVAL;
   }
-  int slave_fd = pty->handle->slave_fd;
+  int slave_fd = pty->handle.slave_fd;
   if (dup2(slave_fd, target_fd) < 0) {
     return (int32_t)errno;
   }
   if (slave_fd != target_fd) {
     close(slave_fd);
   }
-  pty->handle->slave_fd = -1;
+  pty->handle.slave_fd = -1;
   return 0;
 }
 
 MOONBIT_FFI_EXPORT
 void
 moonbit_pty_set_child_pid(MoonBitPty *pty, int32_t pid) {
-  if (!pty || !pty->handle) {
+  if (!pty) {
     return;
   }
-  pty->handle->spawned_pid = (int)pid;
+  pty->handle.spawned_pid = (int)pid;
 }
 
 MOONBIT_FFI_EXPORT
@@ -457,7 +459,7 @@ moonbit_pty_decode_child_error(const uint8_t *data) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
-  if (!pty || !pty->handle || pty->handle->master_fd < 0)
+  if (!pty || pty->handle.master_fd < 0)
     return (int32_t)EINVAL;
 
   struct winsize ws;
@@ -465,7 +467,7 @@ moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
   ws.ws_col = (unsigned short)cols;
   ws.ws_row = (unsigned short)rows;
 
-  if (ioctl(pty->handle->master_fd, TIOCSWINSZ, &ws) == 0)
+  if (ioctl(pty->handle.master_fd, TIOCSWINSZ, &ws) == 0)
     return 0;
   return (int32_t)errno;
 }
@@ -475,19 +477,19 @@ moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_take_read_fd(MoonBitPty *pty) {
-  if (!pty || !pty->handle)
+  if (!pty || pty->handle.master_fd < 0)
     return -1;
-  int fd = pty->handle->master_fd;
-  pty->handle->master_fd = -1;
+  int fd = pty->handle.master_fd;
+  pty->handle.master_fd = -1;
   return (int32_t)fd;
 }
 
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_child_pid(MoonBitPty *pty) {
-  if (!pty || !pty->handle)
+  if (!pty || pty->handle.spawned_pid < 0)
     return -1;
-  return (int32_t)pty->handle->spawned_pid;
+  return (int32_t)pty->handle.spawned_pid;
 }
 
 /* ---- close -------------------------------------------------------------- */
@@ -495,11 +497,9 @@ moonbit_pty_child_pid(MoonBitPty *pty) {
 MOONBIT_FFI_EXPORT
 void
 moonbit_pty_close(MoonBitPty *pty) {
-  if (!pty || !pty->handle)
+  if (!pty)
     return;
-  moonbit_pty_close_impl(pty->handle);
-  free(pty->handle);
-  pty->handle = NULL;
+  moonbit_pty_close_impl(&pty->handle);
 }
 
 /* ========================================================================== */
@@ -762,23 +762,17 @@ moonbit_pty_spawn_windows(const uint8_t *argv_flat, int32_t cols, int32_t rows) 
   }
 
   /* Build the handle. */
-  pty_handle_t *h = (pty_handle_t *)calloc(1, sizeof(pty_handle_t));
-  if (!h) {
-    saved_err = (int32_t)ERROR_NOT_ENOUGH_MEMORY;
-    TerminateProcess(pi.hProcess, 0);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-    goto fail_close_hpc;
-  }
-  h->hpc = hpc;
-  h->pipe_in_read = pipe_in_read;
-  h->pipe_in_write = pipe_in_write;
-  h->pipe_out_read = pipe_out_read;
-  h->pipe_out_write = pipe_out_write;
-  h->proc_handle = pi.hProcess;
-  h->thread_handle = pi.hThread;
+  pty_handle_t h;
+  moonbit_pty_init_handle(&h);
+  h.hpc = hpc;
+  h.pipe_in_read = pipe_in_read;
+  h.pipe_in_write = pipe_in_write;
+  h.pipe_out_read = pipe_out_read;
+  h.pipe_out_write = pipe_out_write;
+  h.proc_handle = pi.hProcess;
+  h.thread_handle = pi.hThread;
 
-  return moonbit_pty_make_success(h);
+  return moonbit_pty_make_success(&h);
 
 fail_close_hpc:
   pfnClosePseudoConsole(hpc);
@@ -800,13 +794,13 @@ fail:
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
-  if (!pty || !pty->handle || !pty->handle->hpc)
+  if (!pty || !pty->handle.hpc)
     return (int32_t)ERROR_INVALID_PARAMETER;
 
   COORD_T size;
   size.X = (short)cols;
   size.Y = (short)rows;
-  HRESULT hr = pfnResizePseudoConsole(pty->handle->hpc, size);
+  HRESULT hr = pfnResizePseudoConsole(pty->handle.hpc, size);
   return SUCCEEDED(hr) ? 0 : (int32_t)hr;
 }
 
@@ -815,29 +809,35 @@ moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
 MOONBIT_FFI_EXPORT
 HANDLE
 moonbit_pty_take_read_fd(MoonBitPty *pty) {
-  if (!pty || !pty->handle)
+  if (
+    !pty || !pty->handle.pipe_out_read ||
+    pty->handle.pipe_out_read == INVALID_HANDLE_VALUE
+  )
     return INVALID_HANDLE_VALUE;
-  HANDLE fd = pty->handle->pipe_out_read;
-  pty->handle->pipe_out_read = INVALID_HANDLE_VALUE;
+  HANDLE fd = pty->handle.pipe_out_read;
+  pty->handle.pipe_out_read = INVALID_HANDLE_VALUE;
   return fd;
 }
 
 MOONBIT_FFI_EXPORT
 HANDLE
 moonbit_pty_take_write_fd_windows(MoonBitPty *pty) {
-  if (!pty || !pty->handle)
+  if (
+    !pty || !pty->handle.pipe_in_write ||
+    pty->handle.pipe_in_write == INVALID_HANDLE_VALUE
+  )
     return INVALID_HANDLE_VALUE;
-  HANDLE fd = pty->handle->pipe_in_write;
-  pty->handle->pipe_in_write = INVALID_HANDLE_VALUE;
+  HANDLE fd = pty->handle.pipe_in_write;
+  pty->handle.pipe_in_write = INVALID_HANDLE_VALUE;
   return fd;
 }
 
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_child_pid(MoonBitPty *pty) {
-  if (!pty || !pty->handle || !pty->handle->proc_handle)
+  if (!pty || !pty->handle.proc_handle)
     return -1;
-  return (int32_t)GetProcessId(pty->handle->proc_handle);
+  return (int32_t)GetProcessId(pty->handle.proc_handle);
 }
 
 /* ---- close -------------------------------------------------------------- */
@@ -845,11 +845,9 @@ moonbit_pty_child_pid(MoonBitPty *pty) {
 MOONBIT_FFI_EXPORT
 void
 moonbit_pty_close(MoonBitPty *pty) {
-  if (!pty || !pty->handle)
+  if (!pty)
     return;
-  moonbit_pty_close_impl(pty->handle);
-  free(pty->handle);
-  pty->handle = NULL;
+  moonbit_pty_close_impl(&pty->handle);
 }
 
 #endif /* _WIN32 */
