@@ -10,7 +10,6 @@
  */
 
 #include <moonbit.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -677,31 +676,12 @@ moonbit_pty_ensure_conpty(void) {
            : -1;
 }
 
-/* ---- named-pipe helper --------------------------------------------------- */
-
-static volatile LONG moonbit_pty_pipe_id = 0;
+/* ---- pipe helper --------------------------------------------------------- */
 
 static int
 moonbit_pty_create_pipe(HANDLE *read_end, HANDLE *write_end) {
-  LONG id = InterlockedIncrement(&moonbit_pty_pipe_id);
-  char name[128];
-  snprintf(
-    name, sizeof(name), "\\\\.\\pipe\\moonbit_pty.%lu.%ld",
-    (unsigned long)GetCurrentProcessId(), id
-  );
-
-  *write_end = CreateNamedPipeA(
-    name, PIPE_ACCESS_OUTBOUND,
-    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 4096, 4096, 0, NULL
-  );
-  if (*write_end == INVALID_HANDLE_VALUE)
-    return -1;
-
-  *read_end = CreateFileA(
-    name, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL
-  );
-  if (*read_end == INVALID_HANDLE_VALUE) {
-    CloseHandle(*write_end);
+  if (!CreatePipe(read_end, write_end, NULL, 0)) {
+    *read_end = INVALID_HANDLE_VALUE;
     *write_end = INVALID_HANDLE_VALUE;
     return -1;
   }
