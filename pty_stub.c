@@ -677,12 +677,12 @@ moonbit_pty_ensure_conpty(void) {
            : -1;
 }
 
-/* ---- overlapped named-pipe helper --------------------------------------- */
+/* ---- named-pipe helper --------------------------------------------------- */
 
 static volatile LONG moonbit_pty_pipe_id = 0;
 
 static int
-moonbit_pty_create_overlapped_pipe(HANDLE *read_end, HANDLE *write_end) {
+moonbit_pty_create_pipe(HANDLE *read_end, HANDLE *write_end) {
   LONG id = InterlockedIncrement(&moonbit_pty_pipe_id);
   char name[128];
   snprintf(
@@ -691,14 +691,14 @@ moonbit_pty_create_overlapped_pipe(HANDLE *read_end, HANDLE *write_end) {
   );
 
   *write_end = CreateNamedPipeA(
-    name, PIPE_ACCESS_OUTBOUND | FILE_FLAG_OVERLAPPED,
+    name, PIPE_ACCESS_OUTBOUND,
     PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 4096, 4096, 0, NULL
   );
   if (*write_end == INVALID_HANDLE_VALUE)
     return -1;
 
   *read_end = CreateFileA(
-    name, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL
+    name, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL
   );
   if (*read_end == INVALID_HANDLE_VALUE) {
     CloseHandle(*write_end);
@@ -801,16 +801,14 @@ moonbit_pty_spawn_windows(const uint8_t *argv_flat, int32_t cols, int32_t rows) 
   HANDLE pipe_out_read = INVALID_HANDLE_VALUE;
   HANDLE pipe_out_write = INVALID_HANDLE_VALUE;
 
-  /* pipe_in: keyboard → ConPTY stdin. Use overlapped named pipe so the
-   * write end can be registered with IOCP for async writes from MoonBit. */
-  if (moonbit_pty_create_overlapped_pipe(&pipe_in_read, &pipe_in_write) < 0) {
+  /* pipe_in: keyboard → ConPTY stdin. */
+  if (moonbit_pty_create_pipe(&pipe_in_read, &pipe_in_write) < 0) {
     saved_err = (int32_t)GetLastError();
     goto fail;
   }
 
-  /* pipe_out: ConPTY stdout → our async reader. Use overlapped named pipe
-   * so the read end can be registered with IOCP for event-driven reads. */
-  if (moonbit_pty_create_overlapped_pipe(&pipe_out_read, &pipe_out_write) < 0) {
+  /* pipe_out: ConPTY stdout → our async reader. */
+  if (moonbit_pty_create_pipe(&pipe_out_read, &pipe_out_write) < 0) {
     saved_err = (int32_t)GetLastError();
     goto fail;
   }
