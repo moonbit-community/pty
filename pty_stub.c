@@ -805,6 +805,10 @@ moonbit_pty_spawn_windows(const uint8_t *argv_flat, int32_t cols, int32_t rows) 
     saved_err = (int32_t)hr;
     goto fail;
   }
+  CloseHandle(pipe_in_read);
+  pipe_in_read = INVALID_HANDLE_VALUE;
+  CloseHandle(pipe_out_write);
+  pipe_out_write = INVALID_HANDLE_VALUE;
 
   /* Prepare STARTUPINFOEXA with the pseudo-console attribute. */
   SIZE_T attr_size = 0;
