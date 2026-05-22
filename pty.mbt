@@ -289,8 +289,8 @@ pub async fn Pty::write(self : Pty, data : Bytes) -> Unit {
 /// Raises `@os_error.OSError` if the underlying syscall fails.
 pub fn Pty::resize(
   self : Pty,
-  cols : Int,
-  rows : Int,
+  cols~ : Int,
+  rows~ : Int,
 ) -> Unit raise @os_error.OSError {
   check_pty_status(pty_resize(self.handle, cols, rows), "Pty::resize")
 }
