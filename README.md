@@ -1,10 +1,8 @@
-# tonyfettes/pty
+# moonbit-community/pty
 
 Cross-platform PTY (pseudo-terminal) spawning for MoonBit native targets,
 integrated with `moonbitlang/async` so reads and writes go through the async
 event loop instead of blocking the thread.
-
-Extracted from `tonyfettes/tun-poc-server`'s `server/pty` package.
 
 ## API
 

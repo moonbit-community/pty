@@ -1,6 +1,6 @@
-name = "tonyfettes/pty"
+name = "moonbit-community/pty"
 
-version = "0.1.0"
+version = "0.2.0"
 
 import {
   "moonbitlang/async@0.19.1",

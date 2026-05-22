@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "tonyfettes/pty"
+package "moonbit-community/pty"
 
 import {
   "moonbitlang/async",
