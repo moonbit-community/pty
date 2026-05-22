@@ -116,6 +116,23 @@ moonbit_pty_ensure_conpty(void) {
            : -1;
 }
 
+static DWORD
+moonbit_pty_win32_error_from_hresult(HRESULT hr) {
+  if (HRESULT_FACILITY(hr) == FACILITY_WIN32) {
+    return HRESULT_CODE(hr);
+  }
+  switch (hr) {
+  case E_INVALIDARG:
+    return ERROR_INVALID_PARAMETER;
+  case E_OUTOFMEMORY:
+    return ERROR_NOT_ENOUGH_MEMORY;
+  case E_NOTIMPL:
+    return ERROR_NOT_SUPPORTED;
+  default:
+    return ERROR_GEN_FAILURE;
+  }
+}
+
 /* ---- pipe helper --------------------------------------------------------- */
 
 static int
@@ -163,6 +180,13 @@ moonbit_pty_close_impl(pty_handle_t *h) {
   }
 }
 
+MOONBIT_FFI_EXPORT
+int32_t
+moonbit_pty_set_invalid_argument(void) {
+  SetLastError(ERROR_INVALID_PARAMETER);
+  return -1;
+}
+
 /*
  * Join a parsed argv into a single Windows command-line string.
  *
@@ -200,21 +224,35 @@ moonbit_pty_join_argv_windows(char **argv) {
 /* ---- spawn -------------------------------------------------------------- */
 
 MOONBIT_FFI_EXPORT
-MoonBitPty *
-moonbit_pty_spawn_windows(const uint8_t *argv_flat, int32_t cols, int32_t rows) {
+int32_t
+moonbit_pty_spawn_windows(
+  MoonBitPty *pty,
+  const uint8_t *argv_flat,
+  int32_t cols,
+  int32_t rows
+) {
   int32_t saved_err = 0;
+  if (!pty) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return -1;
+  }
   if (moonbit_pty_ensure_conpty() < 0) {
     /* ConPTY unavailable — no meaningful GetLastError, use a sentinel. */
-    return moonbit_pty_make_failure((int32_t)ERROR_NOT_SUPPORTED);
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return -1;
   }
 
   char **parsed_argv = moonbit_pty_parse_argv_flat(argv_flat);
-  if (!parsed_argv)
-    return moonbit_pty_make_failure((int32_t)ERROR_NOT_ENOUGH_MEMORY);
+  if (!parsed_argv) {
+    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    return -1;
+  }
   char *cmd_line = moonbit_pty_join_argv_windows(parsed_argv);
   moonbit_pty_free_argv(parsed_argv);
-  if (!cmd_line)
-    return moonbit_pty_make_failure((int32_t)ERROR_NOT_ENOUGH_MEMORY);
+  if (!cmd_line) {
+    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    return -1;
+  }
 
   HANDLE pipe_in_read = INVALID_HANDLE_VALUE;
   HANDLE pipe_in_write = INVALID_HANDLE_VALUE;
@@ -242,7 +280,7 @@ moonbit_pty_spawn_windows(const uint8_t *argv_flat, int32_t cols, int32_t rows) 
   HRESULT hr =
     pfnCreatePseudoConsole(size, pipe_in_read, pipe_out_write, 0, &hpc);
   if (FAILED(hr) || !hpc) {
-    saved_err = (int32_t)hr;
+    saved_err = (int32_t)moonbit_pty_win32_error_from_hresult(hr);
     goto fail;
   }
 
@@ -319,7 +357,9 @@ moonbit_pty_spawn_windows(const uint8_t *argv_flat, int32_t cols, int32_t rows) 
   h.proc_handle = pi.hProcess;
   h.thread_handle = pi.hThread;
 
-  return moonbit_pty_make_success(&h);
+  moonbit_pty_close_impl(&pty->handle);
+  pty->handle = h;
+  return 0;
 
 fail_close_hpc:
   pfnClosePseudoConsole(hpc);
@@ -333,7 +373,8 @@ fail:
   if (pipe_out_write != INVALID_HANDLE_VALUE)
     CloseHandle(pipe_out_write);
   free(cmd_line);
-  return moonbit_pty_make_failure(saved_err);
+  SetLastError((DWORD)saved_err);
+  return -1;
 }
 
 MOONBIT_FFI_EXPORT
@@ -355,14 +396,20 @@ moonbit_pty_kill_pid_windows(int32_t pid) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
-  if (!pty || !pty->handle.hpc)
-    return (int32_t)ERROR_INVALID_PARAMETER;
+  if (!pty || !pty->handle.hpc) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return -1;
+  }
 
   COORD_T size;
   size.X = (short)cols;
   size.Y = (short)rows;
   HRESULT hr = pfnResizePseudoConsole(pty->handle.hpc, size);
-  return SUCCEEDED(hr) ? 0 : (int32_t)hr;
+  if (SUCCEEDED(hr)) {
+    return 0;
+  }
+  SetLastError(moonbit_pty_win32_error_from_hresult(hr));
+  return -1;
 }
 
 /* ---- read_fd ------------------------------------------------------------ */

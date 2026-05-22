@@ -335,8 +335,20 @@ moonbit_pty_close_impl(pty_handle_t *h) {
 }
 
 MOONBIT_FFI_EXPORT
-MoonBitPty *
-moonbit_pty_open(int32_t cols, int32_t rows) {
+int32_t
+moonbit_pty_set_invalid_argument(void) {
+  errno = EINVAL;
+  return -1;
+}
+
+MOONBIT_FFI_EXPORT
+int32_t
+moonbit_pty_open(MoonBitPty *pty, int32_t cols, int32_t rows) {
+  if (!pty) {
+    errno = EINVAL;
+    return -1;
+  }
+
   struct winsize ws;
   memset(&ws, 0, sizeof(ws));
   ws.ws_col = (unsigned short)cols;
@@ -345,7 +357,7 @@ moonbit_pty_open(int32_t cols, int32_t rows) {
   int master_fd = -1;
   int slave_fd = -1;
   if (openpty(&master_fd, &slave_fd, NULL, NULL, &ws) < 0) {
-    return moonbit_pty_make_failure((int32_t)errno);
+    return -1;
   }
   moonbit_pty_set_nonblocking(master_fd);
 
@@ -353,18 +365,21 @@ moonbit_pty_open(int32_t cols, int32_t rows) {
   moonbit_pty_init_handle(&h);
   h.master_fd = master_fd;
   h.slave_fd = slave_fd;
-  return moonbit_pty_make_success(&h);
+  moonbit_pty_close_impl(&pty->handle);
+  pty->handle = h;
+  return 0;
 }
 
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_bind_slave_to_fd(MoonBitPty *pty, int32_t target_fd) {
   if (!pty || pty->handle.slave_fd < 0 || target_fd < 0) {
-    return (int32_t)EINVAL;
+    errno = EINVAL;
+    return -1;
   }
   int slave_fd = pty->handle.slave_fd;
   if (dup2(slave_fd, target_fd) < 0) {
-    return (int32_t)errno;
+    return -1;
   }
   if (slave_fd != target_fd) {
     close(slave_fd);
@@ -393,11 +408,16 @@ moonbit_pty_decode_child_error(const uint8_t *data) {
     return 0;
   }
   if (len != (int32_t)sizeof(int32_t)) {
-    return (int32_t)EIO;
+    errno = EIO;
+    return -1;
   }
   int32_t out = 0;
   memcpy(&out, data, sizeof(out));
-  return out;
+  if (out == 0) {
+    return 0;
+  }
+  errno = (int)out;
+  return -1;
 }
 
 /* ---- resize ------------------------------------------------------------- */
@@ -405,8 +425,10 @@ moonbit_pty_decode_child_error(const uint8_t *data) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
-  if (!pty || pty->handle.master_fd < 0)
-    return (int32_t)EINVAL;
+  if (!pty || pty->handle.master_fd < 0) {
+    errno = EINVAL;
+    return -1;
+  }
 
   struct winsize ws;
   memset(&ws, 0, sizeof(ws));
@@ -415,7 +437,7 @@ moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
 
   if (ioctl(pty->handle.master_fd, TIOCSWINSZ, &ws) == 0)
     return 0;
-  return (int32_t)errno;
+  return -1;
 }
 
 /* ---- read_fd ------------------------------------------------------------ */

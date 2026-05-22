@@ -4,9 +4,8 @@
 /// On Unix the PTY master fd is used for both reading and writing, so
 /// `read_io` and `write_io` are the same `RawFd` wrapper around the same
 /// `IoHandle`. The two fields exist so that reader and writer code paths
-/// can use intent-revealing names, and so that a future Windows build
-/// can point them at the separate input/output pipe HANDLEs without
-/// disturbing callers.
+/// can use intent-revealing names. On Windows they point at the separate
+/// ConPTY input/output pipe HANDLEs.
 struct Pty {
   handle : PtyHandle
   read_io : @raw_fd.RawFd
@@ -17,15 +16,34 @@ struct Pty {
 
 ///|
 priv struct PtySpawn {
-  handle : PtyHandle
   process : @process.Process?
   wait_task : @async.Task[Int]?
 }
 
 ///|
-/// POSIX `EINVAL`. Used as the error code when `argv` is empty —
-/// `@os_error.errno_to_string` renders it as "Invalid argument".
-const EINVAL : Int = 22
+fn raise_last_os_error(context : String) -> Unit raise @os_error.OSError {
+  @os_error.check_errno(context)
+  // Fallback for defensive callers that returned -1 without setting errno.
+  raise @os_error.OSError(0, context~)
+}
+
+///|
+fn check_pty_status(
+  ret : Int,
+  context : String,
+) -> Unit raise @os_error.OSError {
+  if ret < 0 {
+    raise_last_os_error(context)
+  }
+}
+
+///|
+fn raise_invalid_argument(context : String) -> Unit raise @os_error.OSError {
+  // This is for validation failures found in MoonBit before any native call
+  // can set errno/GetLastError. The C shim installs the platform-specific
+  // invalid-argument code, then we report it through the normal os_error path.
+  check_pty_status(pty_set_invalid_argument(), context)
+}
 
 ///|
 /// Spawn a new PTY running the given program.
@@ -49,7 +67,7 @@ pub async fn[X] Pty::spawn(
   no_wait? : Bool,
 ) -> Pty {
   if argv.is_empty() {
-    raise @os_error.OSError(EINVAL, context="Pty::spawn: empty argv")
+    raise_invalid_argument("Pty::spawn: empty argv")
   }
   // Flatten argv into a single null-separated byte buffer:
   //   "arg0\0arg1\0...argN\0"
@@ -61,12 +79,12 @@ pub async fn[X] Pty::spawn(
     buf.write_byte(b'\x00')
   }
   let argv_flat = buf.contents()
-  let spawned = spawn_handle(group, argv_flat, cols, rows, no_wait?)
-  let handle = spawned.handle
-  let spawn_err = pty_check_spawn(handle)
-  if spawn_err != 0 {
-    pty_close(handle)
-    raise @os_error.OSError(spawn_err, context="Pty::spawn")
+  let handle = pty_new()
+  let spawned = spawn_handle(group, handle, argv_flat, cols, rows, no_wait?) catch {
+    err => {
+      pty_close(handle)
+      raise err
+    }
   }
   // Transfer fd ownership from the C PTY handle to `RawFd`.
   let read_io = @raw_fd.RawFd::RawFd(pty_take_read_fd(handle)) catch {
@@ -89,19 +107,19 @@ pub async fn[X] Pty::spawn(
 #cfg(platform="windows")
 fn[X] spawn_handle(
   group : @async.TaskGroup[X],
+  handle : PtyHandle,
   argv_flat : Bytes,
   cols : Int,
   rows : Int,
   no_wait? : Bool,
 ) -> PtySpawn {
-  let handle = pty_spawn_windows(argv_flat, cols, rows)
-  let spawn_err = pty_check_spawn(handle)
-  if spawn_err != 0 {
-    return { handle, process: None, wait_task: None }
-  }
+  check_pty_status(
+    pty_spawn_windows(handle, argv_flat, cols, rows),
+    "Pty::spawn",
+  )
   let pid = pty_child_pid(handle)
   if pid <= 0 {
-    return { handle, process: None, wait_task: None }
+    raise_invalid_argument("Pty::spawn: child pid")
   }
   let wait_task = group.spawn(no_wait?, () => {
     @process.wait_pid(pid) catch {
@@ -113,35 +131,33 @@ fn[X] spawn_handle(
       err => raise err
     }
   })
-  { handle, process: None, wait_task: Some(wait_task) }
+  { process: None, wait_task: Some(wait_task) }
 }
 
 ///|
 #cfg(not(platform="windows"))
 async fn[X] spawn_handle(
   group : @async.TaskGroup[X],
+  handle : PtyHandle,
   argv_flat : Bytes,
   cols : Int,
   rows : Int,
   no_wait? : Bool,
 ) -> PtySpawn {
-  spawn_handle_with_async_self(group, argv_flat, cols, rows, no_wait?)
+  spawn_handle_with_async_self(group, handle, argv_flat, cols, rows, no_wait?)
 }
 
 ///|
 #cfg(not(platform="windows"))
 async fn[X] spawn_handle_with_async_self(
   group : @async.TaskGroup[X],
+  handle : PtyHandle,
   argv_flat : Bytes,
   cols : Int,
   rows : Int,
   no_wait? : Bool,
 ) -> PtySpawn {
-  let handle = pty_open(cols, rows)
-  let open_err = pty_check_spawn(handle)
-  if open_err != 0 {
-    return { handle, process: None, wait_task: None }
-  }
+  check_pty_status(pty_open(handle, cols, rows), "Pty::spawn")
   let mut keep_handle = false
   defer (if !keep_handle { pty_close(handle) })
   let (argv_read, argv_write) = @pipe.pipe()
@@ -155,13 +171,11 @@ async fn[X] spawn_handle_with_async_self(
   defer slave_write.close()
 
   let bind_err = pty_bind_slave_to_fd(handle, slave_write.fd())
-  if bind_err != 0 {
-    raise @os_error.OSError(bind_err, context="Pty::spawn: bind slave")
-  }
+  check_pty_status(bind_err, "Pty::spawn: bind slave")
 
   let self_cmd = @utf8.decode_lossy(pty_self_executable())
   if self_cmd.is_empty() {
-    raise @os_error.OSError(EINVAL, context="Pty::spawn: self executable")
+    raise_invalid_argument("Pty::spawn: self executable")
   }
   let self_args = parse_self_args(pty_self_args_flat())
 
@@ -187,19 +201,13 @@ async fn[X] spawn_handle_with_async_self(
 
   let child_err = pty_decode_child_error(err_read.read_all().binary())
   err_read.close()
-  if child_err != 0 {
-    return {
-      handle: pty_failure(child_err),
-      process: Some(child),
-      wait_task: None,
-    }
-  }
+  check_pty_status(child_err, "Pty::spawn")
   match argv_write_result {
     Ok(_) => ()
     Err(err) => raise err
   }
   keep_handle = true
-  { handle, process: Some(child), wait_task: None }
+  { process: Some(child), wait_task: None }
 }
 
 ///|
@@ -269,7 +277,7 @@ pub async fn Pty::write(self : Pty, data : Bytes) -> Unit {
   while offset < total {
     let n = self.write_io.write(data, offset~, len=total - offset)
     if n <= 0 {
-      raise @os_error.OSError(EINVAL, context="Pty::write: short write")
+      raise_invalid_argument("Pty::write: short write")
     }
     offset += n
   }
@@ -284,11 +292,7 @@ pub fn Pty::resize(
   cols : Int,
   rows : Int,
 ) -> Unit raise @os_error.OSError {
-  // Explicitly narrowed: pty_resize is the only source of error here.
-  let err = pty_resize(self.handle, cols, rows)
-  if err != 0 {
-    raise @os_error.OSError(err, context="Pty::resize")
-  }
+  check_pty_status(pty_resize(self.handle, cols, rows), "Pty::resize")
 }
 
 ///|
