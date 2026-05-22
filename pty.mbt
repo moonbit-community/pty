@@ -10,15 +10,16 @@ struct Pty {
   handle : PtyHandle
   read_io : @raw_fd.RawFd
   write_io : @raw_fd.RawFd
-  process : @process.Process?
-  wait_task : @async.Task[Int]?
+  spawned : PtySpawn
 }
 
 ///|
-priv struct PtySpawn {
-  process : @process.Process?
-  wait_task : @async.Task[Int]?
-}
+#cfg(platform="windows")
+priv struct PtySpawn(@async.Task[Int])
+
+///|
+#cfg(not(platform="windows"))
+priv struct PtySpawn(@process.Process)
 
 ///|
 fn raise_last_os_error(context : String) -> Unit raise @os_error.OSError {
@@ -94,13 +95,7 @@ pub async fn[X] Pty::spawn(
     }
   }
   let write_io = register_write_io(handle, read_io)
-  {
-    handle,
-    read_io,
-    write_io,
-    process: spawned.process,
-    wait_task: spawned.wait_task,
-  }
+  { handle, read_io, write_io, spawned }
 }
 
 ///|
@@ -131,25 +126,12 @@ fn[X] spawn_handle(
       err => raise err
     }
   })
-  { process: None, wait_task: Some(wait_task) }
+  PtySpawn(wait_task)
 }
 
 ///|
 #cfg(not(platform="windows"))
 async fn[X] spawn_handle(
-  group : @async.TaskGroup[X],
-  handle : PtyHandle,
-  argv_flat : Bytes,
-  cols : Int,
-  rows : Int,
-  no_wait? : Bool,
-) -> PtySpawn {
-  spawn_handle_with_async_self(group, handle, argv_flat, cols, rows, no_wait?)
-}
-
-///|
-#cfg(not(platform="windows"))
-async fn[X] spawn_handle_with_async_self(
   group : @async.TaskGroup[X],
   handle : PtyHandle,
   argv_flat : Bytes,
@@ -207,7 +189,7 @@ async fn[X] spawn_handle_with_async_self(
     Err(err) => raise err
   }
   keep_handle = true
-  { process: Some(child), wait_task: None }
+  PtySpawn(child)
 }
 
 ///|
@@ -306,25 +288,29 @@ pub fn Pty::pid(self : Pty) -> Int {
 ///
 /// This is backed by `moonbitlang/async/process`, so waiting/reaping lives
 /// in the async process layer rather than in `Pty::close`.
+#cfg(not(platform="windows"))
 pub async fn Pty::wait(self : Pty) -> Int {
-  match self.process {
-    Some(process) => process.wait()
-    None =>
-      match self.wait_task {
-        Some(task) => task.wait()
-        None => -1
-      }
-  }
+  let PtySpawn(process) = self.spawned
+  process.wait()
+}
+
+///|
+/// Wait for the spawned child process to exit and return its exit code.
+///
+/// This is backed by `moonbitlang/async/process`, so waiting/reaping lives
+/// in the async process layer rather than in `Pty::close`.
+#cfg(platform="windows")
+pub async fn Pty::wait(self : Pty) -> Int {
+  let PtySpawn(task) = self.spawned
+  task.wait()
 }
 
 ///|
 /// Request cancellation of the child process.
 #cfg(not(platform="windows"))
 pub fn Pty::cancel(self : Pty) -> Unit {
-  match self.process {
-    Some(process) => process.cancel()
-    None => ()
-  }
+  let PtySpawn(process) = self.spawned
+  process.cancel()
 }
 
 ///|
