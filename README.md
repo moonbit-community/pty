@@ -23,15 +23,20 @@ Extracted from `tonyfettes/tun-poc-server`'s `server/pty` package.
 
 `Pty::spawn` follows `moonbitlang/async/process.spawn`: it is attached to a
 task group, registers the master fd with the async event loop, and returns a
-handle that can be used while the child is running. `argv[0]` is resolved via
-`PATH` (`execvp`).
+handle that can be used while the child is running. On Unix, `argv[0]` is
+resolved via `PATH` using `execvp`; on Windows, the command is launched through
+`CreateProcessA`.
+
+`Pty::wait` waits for the child process and returns its exit code. `Pty::close`
+only releases PTY resources; if the child is still running, it first requests
+child cancellation. Call `wait` explicitly when the exit code matters.
 
 ## Errors
 
 Failures are reported as `@moonbitlang/async/os_error.OSError(code, context~)`,
 where `code` is `errno` on Unix or `GetLastError()` on Windows. Use the
-package's `is_EACCES`, `is_ENOENT`, `is_nonblocking_io_error`, etc. predicates
-to branch on specific kinds:
+`@os_error` predicates such as `is_EACCES`, `is_ENOENT`, and
+`is_nonblocking_io_error` to branch on specific kinds:
 
 ```moonbit
 try {
@@ -51,6 +56,58 @@ try {
 | macOS | `openpty()` + `moonbitlang/async` self-spawn helper | avoids `fork()` with mimalloc |
 | Linux | `openpty()` + `moonbitlang/async` self-spawn helper | shares the async process spawn path |
 | Windows | ConPTY + `CreateProcessA()` | No fork involved |
+
+## Windows: ConPTY process startup
+
+Windows uses the ConPTY API instead of Unix-style PTYs:
+
+1. Create two synchronous pipes:
+   - input pipe: parent writes keyboard input to `inputWriteSide`; ConPTY reads
+     from `inputReadSide`
+   - output pipe: ConPTY writes screen output to `outputWriteSide`; parent
+     reads from `outputReadSide`
+2. Call `CreatePseudoConsole(size, inputReadSide, outputWriteSide, ...)`.
+3. Prepare `STARTUPINFOEX` with `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`.
+4. Call `CreateProcessA(..., EXTENDED_STARTUPINFO_PRESENT, ...)`.
+5. After `CreateProcessA` succeeds, close `inputReadSide` and
+   `outputWriteSide` in the parent. The parent keeps only `inputWriteSide` and
+   `outputReadSide` for async I/O.
+
+The child process is launched with `bInheritHandles=FALSE`; the ConPTY handle is
+passed through the process-thread attribute list rather than inherited as a raw
+handle.
+
+### Why `STARTF_USESTDHANDLES` is set
+
+When the parent process has redirected stdio, for example inside GitHub Actions
+or a daemon/logging setup, Windows may otherwise copy those redirected stdio
+handles into the child process. In that state, child output can bypass ConPTY
+and go directly to the parent's stdout/stderr instead of the PTY output pipe.
+
+To avoid that, the Windows startup path explicitly sets
+`STARTF_USESTDHANDLES` with zero-initialized stdio handles. This follows the
+same practical pattern used by established ConPTY implementations:
+
+- `microsoft/node-pty` sets `STARTF_USESTDHANDLES`, passes null stdio handles,
+  and creates the child with `bInheritHandles=false`.
+- `wezterm/portable-pty` sets `STARTF_USESTDHANDLES` and uses invalid stdio
+  handles to prevent the child from inheriting redirected parent output handles.
+
+This is separate from the core ConPTY attachment. The actual PTY association is
+still made by `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`; `STARTF_USESTDHANDLES`
+only prevents inherited stdio redirection from competing with that attachment.
+
+### Current Windows argv limitations
+
+The Windows path currently joins `argv` into a `CreateProcessA` command line
+with simple space separation. This works for ordinary commands such as
+`["cmd.exe", "/c", "echo", "READY"]`, but it does not yet implement full
+Windows command-line quoting. Arguments containing spaces, quotes, or
+backslash-quote sequences may be parsed differently by the child process.
+
+Because the implementation calls `CreateProcessA`, non-ASCII executable paths
+and arguments also depend on the process ANSI code page. A future Windows path
+should switch to `CreateProcessW` and proper Windows command-line escaping.
 
 ## macOS: the mimalloc + fork problem
 
