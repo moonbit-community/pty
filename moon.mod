@@ -1,0 +1,19 @@
+name = "tonyfettes/pty"
+
+version = "0.1.0"
+
+import {
+  "moonbitlang/async@0.19.1",
+}
+
+readme = "README.md"
+
+repository = "https://github.com/moonbit-community/tonyfettes-pty"
+
+license = "Apache-2.0"
+
+keywords = [ "pty", "pseudo-terminal", "async", "native" ]
+
+description = "Cross-platform PTY (pseudo-terminal) spawning for MoonBit native targets, integrated with moonbitlang/async."
+
+preferred_target = "native"
