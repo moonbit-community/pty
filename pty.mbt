@@ -112,7 +112,7 @@ fn[X] spawn_handle(
   cols : Int,
   rows : Int,
   no_wait? : Bool,
-) -> PtySpawn {
+) -> PtySpawn raise @os_error.OSError {
   check_pty_status(
     pty_spawn_windows(handle, argv_flat, cols, rows),
     "Pty::spawn",
