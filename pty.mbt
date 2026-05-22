@@ -343,6 +343,9 @@ pub fn Pty::cancel(self : Pty) -> Unit {
 /// Closes the owned `RawFd` wrapper(s) and then tears down the underlying
 /// OS PTY handle.
 ///
+/// Resource lifetime is explicit: call this when the PTY is no longer needed.
+/// The native handle finalizer does not close OS resources.
+///
 /// Safe to call multiple times because the underlying close paths are
 /// idempotent.
 #cfg(not(platform="windows"))
@@ -357,6 +360,9 @@ pub fn Pty::close(self : Pty) -> Unit {
 ///
 /// Closes the owned `RawFd` wrapper(s) and then tears down the underlying
 /// OS PTY handle.
+///
+/// Resource lifetime is explicit: call this when the PTY is no longer needed.
+/// The native handle finalizer does not close OS resources.
 ///
 /// Safe to call multiple times because the underlying close paths are
 /// idempotent.

@@ -319,21 +319,6 @@ moonbit_pty_constructor(void) {
 }
 #endif
 
-/* ---- platform close ----------------------------------------------------- */
-
-static void
-moonbit_pty_close_impl(pty_handle_t *h) {
-  if (h->master_fd >= 0) {
-    close(h->master_fd);
-    h->master_fd = -1;
-  }
-  if (h->slave_fd >= 0) {
-    close(h->slave_fd);
-    h->slave_fd = -1;
-  }
-  h->spawned_pid = -1;
-}
-
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_set_invalid_argument(void) {
@@ -365,7 +350,6 @@ moonbit_pty_open(MoonBitPty *pty, int32_t cols, int32_t rows) {
   moonbit_pty_init_handle(&h);
   h.master_fd = master_fd;
   h.slave_fd = slave_fd;
-  moonbit_pty_close_impl(&pty->handle);
   pty->handle = h;
   return 0;
 }
@@ -467,7 +451,16 @@ void
 moonbit_pty_close(MoonBitPty *pty) {
   if (!pty)
     return;
-  moonbit_pty_close_impl(&pty->handle);
+  pty_handle_t *h = &pty->handle;
+  if (h->master_fd >= 0) {
+    close(h->master_fd);
+    h->master_fd = -1;
+  }
+  if (h->slave_fd >= 0) {
+    close(h->slave_fd);
+    h->slave_fd = -1;
+  }
+  h->spawned_pid = -1;
 }
 
 #endif

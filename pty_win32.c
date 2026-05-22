@@ -145,41 +145,6 @@ moonbit_pty_create_pipe(HANDLE *read_end, HANDLE *write_end) {
   return 0;
 }
 
-/* ---- platform close ----------------------------------------------------- */
-
-static void
-moonbit_pty_close_impl(pty_handle_t *h) {
-  if (h->proc_handle && h->proc_handle != INVALID_HANDLE_VALUE) {
-    TerminateProcess(h->proc_handle, 0);
-    CloseHandle(h->proc_handle);
-    h->proc_handle = NULL;
-  }
-  if (h->thread_handle && h->thread_handle != INVALID_HANDLE_VALUE) {
-    CloseHandle(h->thread_handle);
-    h->thread_handle = NULL;
-  }
-  if (h->hpc) {
-    pfnClosePseudoConsole(h->hpc);
-    h->hpc = NULL;
-  }
-  if (h->pipe_in_read && h->pipe_in_read != INVALID_HANDLE_VALUE) {
-    CloseHandle(h->pipe_in_read);
-    h->pipe_in_read = NULL;
-  }
-  if (h->pipe_in_write && h->pipe_in_write != INVALID_HANDLE_VALUE) {
-    CloseHandle(h->pipe_in_write);
-    h->pipe_in_write = NULL;
-  }
-  if (h->pipe_out_read && h->pipe_out_read != INVALID_HANDLE_VALUE) {
-    CloseHandle(h->pipe_out_read);
-    h->pipe_out_read = NULL;
-  }
-  if (h->pipe_out_write && h->pipe_out_write != INVALID_HANDLE_VALUE) {
-    CloseHandle(h->pipe_out_write);
-    h->pipe_out_write = NULL;
-  }
-}
-
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_set_invalid_argument(void) {
@@ -357,7 +322,6 @@ moonbit_pty_spawn_windows(
   h.proc_handle = pi.hProcess;
   h.thread_handle = pi.hThread;
 
-  moonbit_pty_close_impl(&pty->handle);
   pty->handle = h;
   return 0;
 
@@ -455,7 +419,36 @@ void
 moonbit_pty_close(MoonBitPty *pty) {
   if (!pty)
     return;
-  moonbit_pty_close_impl(&pty->handle);
+  pty_handle_t *h = &pty->handle;
+  if (h->proc_handle && h->proc_handle != INVALID_HANDLE_VALUE) {
+    TerminateProcess(h->proc_handle, 0);
+    CloseHandle(h->proc_handle);
+    h->proc_handle = NULL;
+  }
+  if (h->thread_handle && h->thread_handle != INVALID_HANDLE_VALUE) {
+    CloseHandle(h->thread_handle);
+    h->thread_handle = NULL;
+  }
+  if (h->hpc) {
+    pfnClosePseudoConsole(h->hpc);
+    h->hpc = NULL;
+  }
+  if (h->pipe_in_read && h->pipe_in_read != INVALID_HANDLE_VALUE) {
+    CloseHandle(h->pipe_in_read);
+    h->pipe_in_read = NULL;
+  }
+  if (h->pipe_in_write && h->pipe_in_write != INVALID_HANDLE_VALUE) {
+    CloseHandle(h->pipe_in_write);
+    h->pipe_in_write = NULL;
+  }
+  if (h->pipe_out_read && h->pipe_out_read != INVALID_HANDLE_VALUE) {
+    CloseHandle(h->pipe_out_read);
+    h->pipe_out_read = NULL;
+  }
+  if (h->pipe_out_write && h->pipe_out_write != INVALID_HANDLE_VALUE) {
+    CloseHandle(h->pipe_out_write);
+    h->pipe_out_write = NULL;
+  }
 }
 
 #endif

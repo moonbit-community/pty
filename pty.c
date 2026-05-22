@@ -39,8 +39,11 @@ moonbit_pty_new(void) {
 
 static void
 moonbit_pty_finalizer(void *ptr) {
-  MoonBitPty *pty = (MoonBitPty *)ptr;
-  moonbit_pty_close_impl(&pty->handle);
+  (void)ptr;
+  /* Resource lifetime is explicit, matching moonbitlang/async RawFd/IoHandle.
+   * Users must call Pty::close; GC finalization is intentionally not a
+   * fallback close because that would make child process lifetime depend on
+   * nondeterministic collection. */
 }
 
 #include "pty_win32.c"
