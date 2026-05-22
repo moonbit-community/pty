@@ -44,8 +44,6 @@ typedef struct {
 #define MOONBIT_PTY_INTERNAL extern
 #endif
 
-static void
-moonbit_pty_close_impl(pty_handle_t *h);
 MOONBIT_PTY_INTERNAL void
 moonbit_pty_finalizer(void *ptr);
 MOONBIT_PTY_INTERNAL void
