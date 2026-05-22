@@ -2,21 +2,31 @@
 priv type PtyHandle
 
 ///|
+extern "c" fn pty_new() -> PtyHandle = "moonbit_pty_new"
+
+///|
+/// Set the platform's last OS error to "invalid argument" and return -1.
+///
+/// Some argument errors are detected in MoonBit before we call a syscall, so
+/// there is no fresh errno/GetLastError value for `@os_error.check_errno` to
+/// read. This shim lets those errors use the same 0/-1 + check_errno path as
+/// real native calls without hardcoding POSIX errno values on Windows.
+extern "c" fn pty_set_invalid_argument() -> Int = "moonbit_pty_set_invalid_argument"
+
+///|
 #cfg(platform="windows")
-#borrow(argv_flat)
+#borrow(handle, argv_flat)
 extern "c" fn pty_spawn_windows(
+  handle : PtyHandle,
   argv_flat : Bytes,
   cols : Int,
   rows : Int,
-) -> PtyHandle = "moonbit_pty_spawn_windows"
+) -> Int = "moonbit_pty_spawn_windows"
 
 ///|
 #cfg(not(platform="windows"))
-extern "c" fn pty_failure(errno : Int) -> PtyHandle = "moonbit_pty_failure"
-
-///|
-#cfg(not(platform="windows"))
-extern "c" fn pty_open(cols : Int, rows : Int) -> PtyHandle = "moonbit_pty_open"
+#borrow(handle)
+extern "c" fn pty_open(handle : PtyHandle, cols : Int, rows : Int) -> Int = "moonbit_pty_open"
 
 ///|
 #cfg(not(platform="windows"))
@@ -40,12 +50,6 @@ extern "c" fn pty_self_executable() -> Bytes = "moonbit_pty_self_executable"
 ///|
 #cfg(not(platform="windows"))
 extern "c" fn pty_self_args_flat() -> Bytes = "moonbit_pty_self_args_flat"
-
-///|
-/// Returns the OS error captured during `pty_spawn` (0 = success).
-/// The value is `errno` on Unix / `GetLastError()` on Windows.
-#borrow(handle)
-extern "c" fn pty_check_spawn(handle : PtyHandle) -> Int = "moonbit_pty_check_spawn"
 
 ///|
 #borrow(handle)
