@@ -15,7 +15,7 @@ Extracted from `tonyfettes/tun-poc-server`'s `server/pty` package.
 
   let reader = pty.reader()               // @raw_fd.RawFd
   pty.write(@utf8.encode("ls\n"))         // async
-  pty.resize(120, 40)
+  pty.resize(cols=120, rows=40)
   let pid : Int = pty.pid()
   let exit_code : Int = pty.wait()
 })
