@@ -74,7 +74,7 @@ pub async fn[X] Pty::spawn(
   //   "arg0\0arg1\0...argN\0"
   // The C side walks the buffer by null byte, using the buffer's own
   // length to know when to stop.
-  let buf = @buffer.new()
+  let buf = Buffer()
   for arg in argv {
     buf.write_bytes(@utf8.encode(arg[:]))
     buf.write_byte(b'\x00')
