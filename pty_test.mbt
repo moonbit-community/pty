@@ -40,7 +40,7 @@ async fn read_until_contains(
 #cfg(not(platform="windows"))
 async test "spawn succeeds and reports a child pid" {
   @async.with_task_group(group => {
-    let pty = Pty::spawn(group, ["/bin/sh"])
+    let pty = @pty.spawn(group, ["/bin/sh"])
     defer pty.close()
     assert_true(pty.pid() > 0)
   })
@@ -50,7 +50,7 @@ async test "spawn succeeds and reports a child pid" {
 #cfg(not(platform="windows"))
 async test "cat echoes input through PTY" {
   @async.with_task_group(group => {
-    let pty = Pty::spawn(group, ["/bin/cat"])
+    let pty = @pty.spawn(group, ["/bin/cat"])
     defer pty.close()
     pty.write(@utf8.encode("ping\n"))
     assert_true(read_until_contains(pty, "ping") is Some(_))
@@ -61,7 +61,7 @@ async test "cat echoes input through PTY" {
 #cfg(not(platform="windows"))
 async test "sh accepts commands through PTY" {
   @async.with_task_group(group => {
-    let pty = Pty::spawn(group, ["/bin/sh"])
+    let pty = @pty.spawn(group, ["/bin/sh"])
     defer pty.close()
     pty.write(@utf8.encode("echo READY\nexit\n"))
     assert_true(read_until_contains(pty, "READY") is Some(_))
@@ -72,7 +72,7 @@ async test "sh accepts commands through PTY" {
 #cfg(not(platform="windows"))
 async test "idle PTY read waits instead of EOF" {
   @async.with_task_group(group => {
-    let pty = Pty::spawn(group, ["/bin/cat"])
+    let pty = @pty.spawn(group, ["/bin/cat"])
     defer pty.close()
     let reader = pty.reader()
     let buf : FixedArray[Byte] = FixedArray::make(64, b'\x00')
@@ -89,7 +89,7 @@ async test "idle PTY read waits instead of EOF" {
 #cfg(not(platform="windows"))
 async test "spawn forwards argv beyond argv[0]" {
   @async.with_task_group(group => {
-    let pty = Pty::spawn(group, ["/bin/sh", "-c", "echo ARGV_OK"])
+    let pty = @pty.spawn(group, ["/bin/sh", "-c", "echo ARGV_OK"])
     defer pty.close()
     assert_true(read_until_contains(pty, "ARGV_OK") is Some(_))
   })
@@ -101,7 +101,7 @@ async test "spawn forwards argv beyond argv[0]" {
 #cfg(not(platform="windows"))
 async test "spawn resolves program via PATH" {
   @async.with_task_group(group => {
-    let pty = Pty::spawn(group, ["sh", "-c", "echo PATH_OK"])
+    let pty = @pty.spawn(group, ["sh", "-c", "echo PATH_OK"])
     defer pty.close()
     assert_true(read_until_contains(pty, "PATH_OK") is Some(_))
   })
@@ -111,7 +111,7 @@ async test "spawn resolves program via PATH" {
 #cfg(not(platform="windows"))
 async test "wait returns child exit code" {
   @async.with_task_group(group => {
-    let pty = Pty::spawn(group, ["sh", "-c", "exit 7"])
+    let pty = @pty.spawn(group, ["sh", "-c", "exit 7"])
     defer pty.close()
     debug_inspect(pty.wait(), content="7")
   })
@@ -126,7 +126,7 @@ async test "wait returns child exit code" {
 async test "spawn reports exec failure for missing program" {
   @async.with_task_group(group => {
     let err = try {
-      let pty = Pty::spawn(group, ["/nonexistent/program/xyzzy"])
+      let pty = @pty.spawn(group, ["/nonexistent/program/xyzzy"])
       pty.close()
       None
     } catch {
@@ -145,7 +145,7 @@ async test "spawn reports exec failure for missing program" {
 #cfg(platform="windows")
 async test "cmd outputs through ConPTY" {
   @async.with_task_group(group => {
-    let pty = Pty::spawn(group, ["cmd.exe", "/c", "echo", "WIN_READY"])
+    let pty = @pty.spawn(group, ["cmd.exe", "/c", "echo", "WIN_READY"])
     defer pty.close()
     assert_true(pty.pid() > 0)
     assert_true(read_until_contains(pty, "WIN_READY") is Some(_))
@@ -157,7 +157,7 @@ async test "cmd outputs through ConPTY" {
 #cfg(platform="windows")
 async test "wait returns Windows child exit code" {
   @async.with_task_group(group => {
-    let pty = Pty::spawn(group, ["cmd.exe", "/c", "exit", "7"])
+    let pty = @pty.spawn(group, ["cmd.exe", "/c", "exit", "7"])
     defer pty.close()
     debug_inspect(pty.wait(), content="7")
   })

@@ -8,7 +8,7 @@ event loop instead of blocking the thread.
 
 ```moonbit
 @async.with_task_group(group => {
-  let pty = @pty.Pty::spawn(group, ["/bin/sh", "-c", "echo hello"])
+  let pty = @pty.spawn(group, ["/bin/sh", "-c", "echo hello"])
   defer pty.close()
 
   let reader = pty.reader()               // @raw_fd.RawFd
@@ -19,11 +19,14 @@ event loop instead of blocking the thread.
 })
 ```
 
-`Pty::spawn` follows `moonbitlang/async/process.spawn`: it is attached to a
+`@pty.spawn` follows `moonbitlang/async/process.spawn`: it is attached to a
 task group, registers the master fd with the async event loop, and returns a
 handle that can be used while the child is running. On Unix, `argv[0]` is
 resolved via `PATH` using `execvp`; on Windows, the command is launched through
 `CreateProcessA`.
+
+The deprecated method form `Pty::spawn` is kept for compatibility; prefer
+`@pty.spawn` in new code.
 
 `Pty::wait` waits for the child process and returns its exit code. `Pty::close`
 only releases PTY resources; if the child is still running, it first requests
@@ -39,7 +42,7 @@ where `code` is `errno` on Unix or `GetLastError()` on Windows. Use the
 ```moonbit
 try {
   @async.with_task_group(group => {
-    @pty.Pty::spawn(group, ["/bin/missing"])
+    @pty.spawn(group, ["/bin/missing"])
   })
 } catch {
   err is @os_error.OSError if err.is_ENOENT() => ...
