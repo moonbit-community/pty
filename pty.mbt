@@ -69,7 +69,7 @@ pub async fn[X] Pty::spawn(
     raise @os_error.OSError(spawn_err, context="Pty::spawn")
   }
   // Transfer fd ownership from the C PTY handle to `RawFd`.
-  let read_io = @raw_fd.RawFd::new(pty_take_read_fd(handle)) catch {
+  let read_io = @raw_fd.RawFd::RawFd(pty_take_read_fd(handle)) catch {
     err => {
       pty_close(handle)
       raise err
@@ -237,7 +237,7 @@ async fn register_write_io(
   handle : PtyHandle,
   read_io : @raw_fd.RawFd,
 ) -> @raw_fd.RawFd {
-  @raw_fd.RawFd::new(pty_take_write_fd_windows(handle)) catch {
+  @raw_fd.RawFd::RawFd(pty_take_write_fd_windows(handle)) catch {
     err => {
       read_io.close()
       pty_close(handle)
