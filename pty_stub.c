@@ -836,6 +836,11 @@ moonbit_pty_spawn_windows(const uint8_t *argv_flat, int32_t cols, int32_t rows) 
   STARTUPINFOEXA si;
   ZeroMemory(&si, sizeof(si));
   si.StartupInfo.cb = sizeof(STARTUPINFOEXA);
+  /*
+   * When the parent stdio is redirected, Windows can otherwise copy those
+   * pipe handles into the ConPTY child and bypass the pseudoconsole.
+   */
+  si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
   si.lpAttributeList = attr_list;
 
   PROCESS_INFORMATION pi;
