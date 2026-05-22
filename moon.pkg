@@ -12,6 +12,6 @@ import {
 supported_targets = "native"
 
 options(
-  "native-stub": [ "pty_stub.c" ],
+  "native-stub": [ "pty.c" ],
   targets: { "ffi.mbt": [ "native" ], "pty_test.mbt": [ "native" ] },
 )
