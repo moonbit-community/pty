@@ -60,6 +60,8 @@ fn raise_invalid_argument(context : String) -> Unit raise @os_error.OSError {
 ///
 /// Raises `@os_error.OSError` wrapping `errno` (Unix) or `GetLastError()`
 /// (Windows) if the underlying syscall fails.
+#as_free_fn
+#deprecated("Use @pty.spawn directly")
 pub async fn[X] Pty::spawn(
   group : @async.TaskGroup[X],
   argv : Array[String],
@@ -68,7 +70,7 @@ pub async fn[X] Pty::spawn(
   no_wait? : Bool,
 ) -> Pty {
   if argv.is_empty() {
-    raise_invalid_argument("Pty::spawn: empty argv")
+    raise_invalid_argument("pty.spawn: empty argv")
   }
   // Flatten argv into a single null-separated byte buffer:
   //   "arg0\0arg1\0...argN\0"
@@ -110,11 +112,11 @@ fn[X] spawn_handle(
 ) -> PtySpawn raise @os_error.OSError {
   check_pty_status(
     pty_spawn_windows(handle, argv_flat, cols, rows),
-    "Pty::spawn",
+    "pty.spawn",
   )
   let pid = pty_child_pid(handle)
   if pid <= 0 {
-    raise_invalid_argument("Pty::spawn: child pid")
+    raise_invalid_argument("pty.spawn: child pid")
   }
   let wait_task = group.spawn(no_wait?, () => {
     @process.wait_pid(pid) catch {
@@ -139,7 +141,7 @@ async fn[X] spawn_handle(
   rows : Int,
   no_wait? : Bool,
 ) -> PtySpawn {
-  check_pty_status(pty_open(handle, cols, rows), "Pty::spawn")
+  check_pty_status(pty_open(handle, cols, rows), "pty.spawn")
   let mut keep_handle = false
   defer (if !keep_handle { pty_close(handle) })
   let (argv_read, argv_write) = @pipe.pipe()
@@ -153,11 +155,11 @@ async fn[X] spawn_handle(
   defer slave_write.close()
 
   let bind_err = pty_bind_slave_to_fd(handle, slave_write.fd())
-  check_pty_status(bind_err, "Pty::spawn: bind slave")
+  check_pty_status(bind_err, "pty.spawn: bind slave")
 
   let self_cmd = @utf8.decode_lossy(pty_self_executable())
   if self_cmd.is_empty() {
-    raise_invalid_argument("Pty::spawn: self executable")
+    raise_invalid_argument("pty.spawn: self executable")
   }
   let self_args = parse_self_args(pty_self_args_flat())
 
@@ -183,7 +185,7 @@ async fn[X] spawn_handle(
 
   let child_err = pty_decode_child_error(err_read.read_all().binary())
   err_read.close()
-  check_pty_status(child_err, "Pty::spawn")
+  check_pty_status(child_err, "pty.spawn")
   match argv_write_result {
     Ok(_) => ()
     Err(err) => raise err
