@@ -97,12 +97,16 @@ fn StringBuilder::write_windows_arg(
   builder : StringBuilder,
   arg : StringView,
 ) -> Unit {
-  let need_quote = for char in arg {
-    if char is (' ' | '\t' | '"') {
-      break true
+  let need_quote = if arg.length() == 0 {
+    true
+  } else {
+    for char in arg {
+      if char is (' ' | '\t' | '"') {
+        break true
+      }
+    } nobreak {
+      false
     }
-  } nobreak {
-    false
   }
   if !need_quote {
     builder.write_stringview(arg)
@@ -118,8 +122,8 @@ fn StringBuilder::write_windows_arg(
       if trailing_backslash > 0 {
         builder.write_string(String::make(trailing_backslash * 2, '\\'))
       }
-      segment_start = index + skip
     }
+    segment_start = index + skip
   }
 
   builder.write_char('"')
