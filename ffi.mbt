@@ -15,10 +15,10 @@ extern "c" fn pty_set_invalid_argument() -> Int = "moonbit_pty_set_invalid_argum
 
 ///|
 #cfg(platform="windows")
-#borrow(handle, argv_flat)
+#borrow(handle, command_line)
 extern "c" fn pty_spawn_windows(
   handle : PtyHandle,
-  argv_flat : Bytes,
+  command_line : Bytes,
   cols : Int,
   rows : Int,
 ) -> Int = "moonbit_pty_spawn_windows"

@@ -9,63 +9,6 @@
 
 #ifdef _WIN32
 
-static char **
-moonbit_pty_parse_argv_flat(const uint8_t *argv_flat) {
-  if (!argv_flat) {
-    return NULL;
-  }
-  int32_t flat_len = (int32_t)Moonbit_array_length(argv_flat);
-  if (flat_len <= 0 || argv_flat[flat_len - 1] != 0) {
-    return NULL; /* Empty, or missing trailing null terminator */
-  }
-
-  int32_t argc = 0;
-  for (int32_t i = 0; i < flat_len; i++) {
-    if (argv_flat[i] == 0)
-      argc++;
-  }
-  if (argc == 0) {
-    return NULL;
-  }
-
-  char **out = (char **)calloc((size_t)argc + 1, sizeof(char *));
-  if (!out) {
-    return NULL;
-  }
-
-  int32_t pos = 0;
-  for (int i = 0; i < argc; i++) {
-    int32_t end = pos;
-    while (argv_flat[end] != 0) {
-      end++;
-    }
-    int32_t len = end - pos;
-    char *str = (char *)malloc((size_t)len + 1);
-    if (!str) {
-      for (int j = 0; j < i; j++)
-        free(out[j]);
-      free(out);
-      return NULL;
-    }
-    memcpy(str, argv_flat + pos, (size_t)len);
-    str[len] = '\0';
-    out[i] = str;
-    pos = end + 1;
-  }
-  out[argc] = NULL;
-  return out;
-}
-
-static void
-moonbit_pty_free_argv(char **argv) {
-  if (!argv)
-    return;
-  for (int i = 0; argv[i]; i++) {
-    free(argv[i]);
-  }
-  free(argv);
-}
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -152,101 +95,13 @@ moonbit_pty_set_invalid_argument(void) {
   return -1;
 }
 
-/* Quote one argv item using the parsing rules used by the Microsoft C runtime.
- * CreateProcess accepts a single command-line string, so preserving MoonBit's
- * argv array requires escaping spaces, quotes, and backslash-quote runs here.
- */
-static size_t
-moonbit_pty_windows_quoted_arg_len(const char *arg) {
-  size_t len = strlen(arg);
-  int needs_quotes = (len == 0 || strpbrk(arg, " \t\"") != NULL);
-  if (!needs_quotes) {
-    return len;
-  }
-
-  size_t out_len = 2; /* surrounding quotes */
-  size_t backslashes = 0;
-  for (const char *p = arg; *p; p++) {
-    if (*p == '\\') {
-      backslashes++;
-      out_len++;
-    } else if (*p == '"') {
-      out_len += backslashes + 2; /* double slashes, then escape quote */
-      backslashes = 0;
-    } else {
-      backslashes = 0;
-      out_len++;
-    }
-  }
-  return out_len + backslashes; /* double trailing slashes before final quote */
-}
-
-static void
-moonbit_pty_windows_write_quoted_arg(char **dst, const char *arg) {
-  size_t len = strlen(arg);
-  int needs_quotes = (len == 0 || strpbrk(arg, " \t\"") != NULL);
-  if (!needs_quotes) {
-    memcpy(*dst, arg, len);
-    *dst += len;
-    return;
-  }
-
-  *(*dst)++ = '"';
-  size_t backslashes = 0;
-  for (const char *p = arg; *p; p++) {
-    if (*p == '\\') {
-      *(*dst)++ = '\\';
-      backslashes++;
-    } else if (*p == '"') {
-      for (size_t i = 0; i < backslashes; i++) {
-        *(*dst)++ = '\\';
-      }
-      *(*dst)++ = '\\';
-      *(*dst)++ = '"';
-      backslashes = 0;
-    } else {
-      backslashes = 0;
-      *(*dst)++ = *p;
-    }
-  }
-  for (size_t i = 0; i < backslashes; i++) {
-    *(*dst)++ = '\\';
-  }
-  *(*dst)++ = '"';
-}
-
-static char *
-moonbit_pty_join_argv_windows(char **argv) {
-  if (!argv || !argv[0])
-    return NULL;
-  size_t total = 1; /* trailing NUL */
-  for (int i = 0; argv[i]; i++) {
-    if (i > 0) {
-      total++;
-    }
-    total += moonbit_pty_windows_quoted_arg_len(argv[i]);
-  }
-  char *out = (char *)malloc(total);
-  if (!out)
-    return NULL;
-  char *pos = out;
-  for (int i = 0; argv[i]; i++) {
-    if (i > 0) {
-      *pos++ = ' ';
-    }
-    moonbit_pty_windows_write_quoted_arg(&pos, argv[i]);
-  }
-  *pos = '\0';
-  return out;
-}
-
 /* ---- spawn -------------------------------------------------------------- */
 
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_spawn_windows(
   MoonBitPty *pty,
-  const uint8_t *argv_flat,
+  const uint8_t *command_line,
   int32_t cols,
   int32_t rows
 ) {
@@ -261,17 +116,22 @@ moonbit_pty_spawn_windows(
     return -1;
   }
 
-  char **parsed_argv = moonbit_pty_parse_argv_flat(argv_flat);
-  if (!parsed_argv) {
-    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+  if (!command_line) {
+    SetLastError(ERROR_INVALID_PARAMETER);
     return -1;
   }
-  char *cmd_line = moonbit_pty_join_argv_windows(parsed_argv);
-  moonbit_pty_free_argv(parsed_argv);
+  int32_t command_line_len = (int32_t)Moonbit_array_length(command_line);
+  if (command_line_len <= 0) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return -1;
+  }
+  char *cmd_line = (char *)malloc((size_t)command_line_len + 1);
   if (!cmd_line) {
     SetLastError(ERROR_NOT_ENOUGH_MEMORY);
     return -1;
   }
+  memcpy(cmd_line, command_line, (size_t)command_line_len);
+  cmd_line[command_line_len] = '\0';
 
   HANDLE pipe_in_read = INVALID_HANDLE_VALUE;
   HANDLE pipe_in_write = INVALID_HANDLE_VALUE;
