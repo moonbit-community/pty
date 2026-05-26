@@ -101,7 +101,7 @@ MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_spawn_windows(
   MoonBitPty *pty,
-  const uint8_t *command_line,
+  const uint8_t *command_line_bytes,
   int32_t cols,
   int32_t rows
 ) {
@@ -116,22 +116,28 @@ moonbit_pty_spawn_windows(
     return -1;
   }
 
-  if (!command_line) {
+  if (!command_line_bytes) {
     SetLastError(ERROR_INVALID_PARAMETER);
     return -1;
   }
-  int32_t command_line_len = (int32_t)Moonbit_array_length(command_line);
+  int32_t command_line_len = (int32_t)Moonbit_array_length(command_line_bytes);
   if (command_line_len <= 0) {
     SetLastError(ERROR_INVALID_PARAMETER);
     return -1;
   }
-  char *cmd_line = (char *)malloc((size_t)command_line_len + 1);
-  if (!cmd_line) {
+  /*
+   * CreateProcessA takes a mutable LPSTR and may write into it while parsing.
+   * Keep MoonBit's GC-managed Bytes untouched by copying only its logical
+   * contents into an owned C buffer, then add our own NUL terminator instead
+   * of relying on the runtime's internal Bytes padding.
+   */
+  char *mutable_command_line = (char *)malloc((size_t)command_line_len + 1);
+  if (!mutable_command_line) {
     SetLastError(ERROR_NOT_ENOUGH_MEMORY);
     return -1;
   }
-  memcpy(cmd_line, command_line, (size_t)command_line_len);
-  cmd_line[command_line_len] = '\0';
+  memcpy(mutable_command_line, command_line_bytes, (size_t)command_line_len);
+  mutable_command_line[command_line_len] = '\0';
 
   HANDLE pipe_in_read = INVALID_HANDLE_VALUE;
   HANDLE pipe_in_write = INVALID_HANDLE_VALUE;
@@ -204,17 +210,16 @@ moonbit_pty_spawn_windows(
   ZeroMemory(&pi, sizeof(pi));
 
   BOOL ok = CreateProcessA(
-    NULL, cmd_line, /* command line (mutable copy OK — Windows makes its own) */
-    NULL, NULL, FALSE, EXTENDED_STARTUPINFO_PRESENT, NULL, NULL,
-    &si.StartupInfo, &pi
+    NULL, mutable_command_line, NULL, NULL, FALSE, EXTENDED_STARTUPINFO_PRESENT,
+    NULL, NULL, &si.StartupInfo, &pi
   );
 
   DeleteProcThreadAttributeList(attr_list);
   HeapFree(GetProcessHeap(), 0, attr_list);
 
   /* CreateProcessA has consumed the command line; safe to free now. */
-  free(cmd_line);
-  cmd_line = NULL;
+  free(mutable_command_line);
+  mutable_command_line = NULL;
 
   if (!ok) {
     saved_err = (int32_t)GetLastError();
@@ -250,7 +255,7 @@ fail:
     CloseHandle(pipe_out_read);
   if (pipe_out_write != INVALID_HANDLE_VALUE)
     CloseHandle(pipe_out_write);
-  free(cmd_line);
+  free(mutable_command_line);
   SetLastError((DWORD)saved_err);
   return -1;
 }
