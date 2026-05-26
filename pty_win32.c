@@ -152,37 +152,91 @@ moonbit_pty_set_invalid_argument(void) {
   return -1;
 }
 
-/*
- * Join a parsed argv into a single Windows command-line string.
- *
- * TODO(windows): proper CommandLineToArgvW-compatible quoting. For now this
- * does a naive space-join which works for args that don't contain spaces,
- * tabs, quotes, or backslash-quote sequences. The design doc accepts this
- * as a v1 shortcut. When Windows support becomes real, replace with full
- * escaping per
- * https://learn.microsoft.com/en-us/cpp/cpp/main-function-command-line-args#parsing-c-command-line-arguments
+/* Quote one argv item using the parsing rules used by the Microsoft C runtime.
+ * CreateProcess accepts a single command-line string, so preserving MoonBit's
+ * argv array requires escaping spaces, quotes, and backslash-quote runs here.
  */
+static size_t
+moonbit_pty_windows_quoted_arg_len(const char *arg) {
+  size_t len = strlen(arg);
+  int needs_quotes = (len == 0 || strpbrk(arg, " \t\"") != NULL);
+  if (!needs_quotes) {
+    return len;
+  }
+
+  size_t out_len = 2; /* surrounding quotes */
+  size_t backslashes = 0;
+  for (const char *p = arg; *p; p++) {
+    if (*p == '\\') {
+      backslashes++;
+      out_len++;
+    } else if (*p == '"') {
+      out_len += backslashes + 2; /* double slashes, then escape quote */
+      backslashes = 0;
+    } else {
+      backslashes = 0;
+      out_len++;
+    }
+  }
+  return out_len + backslashes; /* double trailing slashes before final quote */
+}
+
+static void
+moonbit_pty_windows_write_quoted_arg(char **dst, const char *arg) {
+  size_t len = strlen(arg);
+  int needs_quotes = (len == 0 || strpbrk(arg, " \t\"") != NULL);
+  if (!needs_quotes) {
+    memcpy(*dst, arg, len);
+    *dst += len;
+    return;
+  }
+
+  *(*dst)++ = '"';
+  size_t backslashes = 0;
+  for (const char *p = arg; *p; p++) {
+    if (*p == '\\') {
+      *(*dst)++ = '\\';
+      backslashes++;
+    } else if (*p == '"') {
+      for (size_t i = 0; i < backslashes; i++) {
+        *(*dst)++ = '\\';
+      }
+      *(*dst)++ = '\\';
+      *(*dst)++ = '"';
+      backslashes = 0;
+    } else {
+      backslashes = 0;
+      *(*dst)++ = *p;
+    }
+  }
+  for (size_t i = 0; i < backslashes; i++) {
+    *(*dst)++ = '\\';
+  }
+  *(*dst)++ = '"';
+}
+
 static char *
 moonbit_pty_join_argv_windows(char **argv) {
   if (!argv || !argv[0])
     return NULL;
-  size_t total = 0;
+  size_t total = 1; /* trailing NUL */
   for (int i = 0; argv[i]; i++) {
-    total += strlen(argv[i]) + 1; /* +1 for space or terminator */
+    if (i > 0) {
+      total++;
+    }
+    total += moonbit_pty_windows_quoted_arg_len(argv[i]);
   }
   char *out = (char *)malloc(total);
   if (!out)
     return NULL;
-  size_t pos = 0;
+  char *pos = out;
   for (int i = 0; argv[i]; i++) {
-    size_t len = strlen(argv[i]);
     if (i > 0) {
-      out[pos++] = ' ';
+      *pos++ = ' ';
     }
-    memcpy(out + pos, argv[i], len);
-    pos += len;
+    moonbit_pty_windows_write_quoted_arg(&pos, argv[i]);
   }
-  out[pos] = '\0';
+  *pos = '\0';
   return out;
 }
 
