@@ -72,18 +72,9 @@ pub async fn[X] Pty::spawn(
   if argv.is_empty() {
     raise_invalid_argument("pty.spawn: empty argv")
   }
-  // Flatten argv into a single null-separated byte buffer:
-  //   "arg0\0arg1\0...argN\0"
-  // The C side walks the buffer by null byte, using the buffer's own
-  // length to know when to stop.
-  let buf = Buffer()
-  for arg in argv {
-    buf.write_bytes(@utf8.encode(arg[:]))
-    buf.write_byte(b'\x00')
-  }
-  let argv_flat = buf.contents()
+  let spawn_payload = build_spawn_payload(argv)
   let handle = pty_new()
-  let spawned = spawn_handle(group, handle, argv_flat, cols, rows, no_wait?) catch {
+  let spawned = spawn_handle(group, handle, spawn_payload, cols, rows, no_wait?) catch {
     err => {
       pty_close(handle)
       raise err
@@ -102,16 +93,96 @@ pub async fn[X] Pty::spawn(
 
 ///|
 #cfg(platform="windows")
+fn StringBuilder::write_windows_arg(
+  builder : StringBuilder,
+  arg : StringView,
+) -> Unit {
+  let need_quote = if arg.length() == 0 {
+    true
+  } else {
+    for char in arg {
+      if char is (' ' | '\t' | '"') {
+        break true
+      }
+    } nobreak {
+      false
+    }
+  }
+  if !need_quote {
+    builder.write_stringview(arg)
+    return
+  }
+
+  let mut segment_start = 0
+  let mut index = 0
+  let mut trailing_backslash = 0
+  fn flush(skip : Int) {
+    if index > segment_start {
+      builder.write_stringview(arg[segment_start:index - trailing_backslash])
+      if trailing_backslash > 0 {
+        builder.write_string(String::make(trailing_backslash * 2, '\\'))
+      }
+    }
+    segment_start = index + skip
+  }
+
+  builder.write_char('"')
+  while index < arg.length() {
+    match arg.code_unit_at(index) {
+      '"' => {
+        flush(1)
+        builder.write_string("\\\"")
+        trailing_backslash = 0
+      }
+      '\\' => trailing_backslash += 1
+      _ => trailing_backslash = 0
+    }
+    index += 1
+  }
+  flush(0)
+  builder.write_char('"')
+}
+
+///|
+#cfg(platform="windows")
+fn build_spawn_payload(argv : Array[String]) -> Bytes {
+  let command_line = StringBuilder::new()
+  for i, arg in argv {
+    if i > 0 {
+      command_line.write_char(' ')
+    }
+    command_line.write_windows_arg(arg[:])
+  }
+  @utf8.encode(command_line.to_string()[:])
+}
+
+///|
+#cfg(not(platform="windows"))
+fn build_spawn_payload(argv : Array[String]) -> Bytes {
+  // Flatten argv into a single null-separated byte buffer:
+  //   "arg0\0arg1\0...argN\0"
+  // The Unix helper walks the buffer by null byte, using the buffer's own
+  // length to know when to stop.
+  let buf = Buffer()
+  for arg in argv {
+    buf.write_bytes(@utf8.encode(arg[:]))
+    buf.write_byte(b'\x00')
+  }
+  buf.contents()
+}
+
+///|
+#cfg(platform="windows")
 fn[X] spawn_handle(
   group : @async.TaskGroup[X],
   handle : PtyHandle,
-  argv_flat : Bytes,
+  command_line : Bytes,
   cols : Int,
   rows : Int,
   no_wait? : Bool,
 ) -> PtySpawn raise @os_error.OSError {
   check_pty_status(
-    pty_spawn_windows(handle, argv_flat, cols, rows),
+    pty_spawn_windows(handle, command_line, cols, rows),
     "pty.spawn",
   )
   let pid = pty_child_pid(handle)

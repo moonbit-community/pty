@@ -9,63 +9,6 @@
 
 #ifdef _WIN32
 
-static char **
-moonbit_pty_parse_argv_flat(const uint8_t *argv_flat) {
-  if (!argv_flat) {
-    return NULL;
-  }
-  int32_t flat_len = (int32_t)Moonbit_array_length(argv_flat);
-  if (flat_len <= 0 || argv_flat[flat_len - 1] != 0) {
-    return NULL; /* Empty, or missing trailing null terminator */
-  }
-
-  int32_t argc = 0;
-  for (int32_t i = 0; i < flat_len; i++) {
-    if (argv_flat[i] == 0)
-      argc++;
-  }
-  if (argc == 0) {
-    return NULL;
-  }
-
-  char **out = (char **)calloc((size_t)argc + 1, sizeof(char *));
-  if (!out) {
-    return NULL;
-  }
-
-  int32_t pos = 0;
-  for (int i = 0; i < argc; i++) {
-    int32_t end = pos;
-    while (argv_flat[end] != 0) {
-      end++;
-    }
-    int32_t len = end - pos;
-    char *str = (char *)malloc((size_t)len + 1);
-    if (!str) {
-      for (int j = 0; j < i; j++)
-        free(out[j]);
-      free(out);
-      return NULL;
-    }
-    memcpy(str, argv_flat + pos, (size_t)len);
-    str[len] = '\0';
-    out[i] = str;
-    pos = end + 1;
-  }
-  out[argc] = NULL;
-  return out;
-}
-
-static void
-moonbit_pty_free_argv(char **argv) {
-  if (!argv)
-    return;
-  for (int i = 0; argv[i]; i++) {
-    free(argv[i]);
-  }
-  free(argv);
-}
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -152,47 +95,13 @@ moonbit_pty_set_invalid_argument(void) {
   return -1;
 }
 
-/*
- * Join a parsed argv into a single Windows command-line string.
- *
- * TODO(windows): proper CommandLineToArgvW-compatible quoting. For now this
- * does a naive space-join which works for args that don't contain spaces,
- * tabs, quotes, or backslash-quote sequences. The design doc accepts this
- * as a v1 shortcut. When Windows support becomes real, replace with full
- * escaping per
- * https://learn.microsoft.com/en-us/cpp/cpp/main-function-command-line-args#parsing-c-command-line-arguments
- */
-static char *
-moonbit_pty_join_argv_windows(char **argv) {
-  if (!argv || !argv[0])
-    return NULL;
-  size_t total = 0;
-  for (int i = 0; argv[i]; i++) {
-    total += strlen(argv[i]) + 1; /* +1 for space or terminator */
-  }
-  char *out = (char *)malloc(total);
-  if (!out)
-    return NULL;
-  size_t pos = 0;
-  for (int i = 0; argv[i]; i++) {
-    size_t len = strlen(argv[i]);
-    if (i > 0) {
-      out[pos++] = ' ';
-    }
-    memcpy(out + pos, argv[i], len);
-    pos += len;
-  }
-  out[pos] = '\0';
-  return out;
-}
-
 /* ---- spawn -------------------------------------------------------------- */
 
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_spawn_windows(
   MoonBitPty *pty,
-  const uint8_t *argv_flat,
+  const uint8_t *command_line_bytes,
   int32_t cols,
   int32_t rows
 ) {
@@ -207,17 +116,28 @@ moonbit_pty_spawn_windows(
     return -1;
   }
 
-  char **parsed_argv = moonbit_pty_parse_argv_flat(argv_flat);
-  if (!parsed_argv) {
+  if (!command_line_bytes) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return -1;
+  }
+  int32_t command_line_len = (int32_t)Moonbit_array_length(command_line_bytes);
+  if (command_line_len <= 0) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return -1;
+  }
+  /*
+   * CreateProcessA takes a mutable LPSTR and may write into it while parsing.
+   * Keep MoonBit's GC-managed Bytes untouched by copying only its logical
+   * contents into an owned C buffer, then add our own NUL terminator instead
+   * of relying on the runtime's internal Bytes padding.
+   */
+  char *mutable_command_line = (char *)malloc((size_t)command_line_len + 1);
+  if (!mutable_command_line) {
     SetLastError(ERROR_NOT_ENOUGH_MEMORY);
     return -1;
   }
-  char *cmd_line = moonbit_pty_join_argv_windows(parsed_argv);
-  moonbit_pty_free_argv(parsed_argv);
-  if (!cmd_line) {
-    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-    return -1;
-  }
+  memcpy(mutable_command_line, command_line_bytes, (size_t)command_line_len);
+  mutable_command_line[command_line_len] = '\0';
 
   HANDLE pipe_in_read = INVALID_HANDLE_VALUE;
   HANDLE pipe_in_write = INVALID_HANDLE_VALUE;
@@ -290,17 +210,16 @@ moonbit_pty_spawn_windows(
   ZeroMemory(&pi, sizeof(pi));
 
   BOOL ok = CreateProcessA(
-    NULL, cmd_line, /* command line (mutable copy OK — Windows makes its own) */
-    NULL, NULL, FALSE, EXTENDED_STARTUPINFO_PRESENT, NULL, NULL,
-    &si.StartupInfo, &pi
+    NULL, mutable_command_line, NULL, NULL, FALSE, EXTENDED_STARTUPINFO_PRESENT,
+    NULL, NULL, &si.StartupInfo, &pi
   );
 
   DeleteProcThreadAttributeList(attr_list);
   HeapFree(GetProcessHeap(), 0, attr_list);
 
   /* CreateProcessA has consumed the command line; safe to free now. */
-  free(cmd_line);
-  cmd_line = NULL;
+  free(mutable_command_line);
+  mutable_command_line = NULL;
 
   if (!ok) {
     saved_err = (int32_t)GetLastError();
@@ -336,7 +255,7 @@ fail:
     CloseHandle(pipe_out_read);
   if (pipe_out_write != INVALID_HANDLE_VALUE)
     CloseHandle(pipe_out_write);
-  free(cmd_line);
+  free(mutable_command_line);
   SetLastError((DWORD)saved_err);
   return -1;
 }
