@@ -132,6 +132,7 @@ fn StringBuilder::write_windows_arg(
       '"' => {
         flush(1)
         builder.write_string("\\\"")
+        trailing_backslash = 0
       }
       '\\' => trailing_backslash += 1
       _ => trailing_backslash = 0

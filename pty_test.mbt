@@ -180,8 +180,8 @@ async test "wait returns Windows child exit code" {
 async test "Windows spawn preserves argv quoting" {
   @async.with_task_group(group => {
     let pty = @pty.spawn(group, [
-      "powershell.exe", "-NoProfile", "-Command", "if ($args[0] -eq 'hello world' -and $args[1] -eq 'quote \" mark' -and $args[2] -eq '\"leading' -and $args[3] -eq '' -and $args[4] -eq '\"') { Write-Output 'WIN_ARGV_OK'; exit 0 } else { exit 1 }",
-      "--", "hello world", "quote \" mark", "\"leading", "", "\"",
+      "powershell.exe", "-NoProfile", "-Command", "if ($args[0] -eq 'hello world' -and $args[1] -eq 'quote \" mark' -and $args[2] -eq '\"leading' -and $args[3] -eq '' -and $args[4] -eq '\"' -and $args[5].Length -eq 3 -and [int][char]$args[5][0] -eq 92 -and [int][char]$args[5][1] -eq 34 -and [int][char]$args[5][2] -eq 92) { Write-Output 'WIN_ARGV_OK'; exit 0 } else { exit 1 }",
+      "--", "hello world", "quote \" mark", "\"leading", "", "\"", "\\\"\\",
     ])
     defer pty.close()
     assert_true(read_until_contains(pty, "WIN_ARGV_OK") is Some(_))
