@@ -109,6 +109,18 @@ async test "spawn resolves program via PATH" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "resize works after spawn" {
+  @async.with_task_group(group => {
+    let pty = @pty.spawn(group, ["/bin/sh"], cols=100, rows=30)
+    defer pty.close()
+    pty.resize(cols=101, rows=31)
+    pty.write(@utf8.encode("stty size\nexit\n"))
+    assert_true(read_until_contains(pty, "31 101", max_reads=16) is Some(_))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "wait returns child exit code" {
   @async.with_task_group(group => {
     let pty = @pty.spawn(group, ["sh", "-c", "exit 7"])
