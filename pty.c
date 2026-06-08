@@ -18,6 +18,7 @@ moonbit_pty_init_handle(pty_handle_t *h) {
   memset(h, 0, sizeof(*h));
 #ifndef _WIN32
   h->master_fd = -1;
+  h->control_fd = -1;
   h->slave_fd = -1;
   h->spawned_pid = -1;
 #endif

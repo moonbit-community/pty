@@ -344,11 +344,20 @@ moonbit_pty_open(MoonBitPty *pty, int32_t cols, int32_t rows) {
   if (openpty(&master_fd, &slave_fd, NULL, NULL, &ws) < 0) {
     return -1;
   }
+  int control_fd = dup(master_fd);
+  if (control_fd < 0) {
+    int saved_errno = errno;
+    close(master_fd);
+    close(slave_fd);
+    errno = saved_errno;
+    return -1;
+  }
   moonbit_pty_set_nonblocking(master_fd);
 
   pty_handle_t h;
   moonbit_pty_init_handle(&h);
   h.master_fd = master_fd;
+  h.control_fd = control_fd;
   h.slave_fd = slave_fd;
   pty->handle = h;
   return 0;
@@ -409,7 +418,7 @@ moonbit_pty_decode_child_error(const uint8_t *data) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
-  if (!pty || pty->handle.master_fd < 0) {
+  if (!pty || pty->handle.control_fd < 0) {
     errno = EINVAL;
     return -1;
   }
@@ -419,7 +428,7 @@ moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
   ws.ws_col = (unsigned short)cols;
   ws.ws_row = (unsigned short)rows;
 
-  if (ioctl(pty->handle.master_fd, TIOCSWINSZ, &ws) == 0)
+  if (ioctl(pty->handle.control_fd, TIOCSWINSZ, &ws) == 0)
     return 0;
   return -1;
 }
@@ -455,6 +464,10 @@ moonbit_pty_close(MoonBitPty *pty) {
   if (h->master_fd >= 0) {
     close(h->master_fd);
     h->master_fd = -1;
+  }
+  if (h->control_fd >= 0) {
+    close(h->control_fd);
+    h->control_fd = -1;
   }
   if (h->slave_fd >= 0) {
     close(h->slave_fd);
