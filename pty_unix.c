@@ -24,6 +24,7 @@
 #include <libutil.h>
 #else
 #include <pty.h>
+#include <utmp.h>
 #endif
 
 #if defined(__APPLE__) || defined(__linux__)
