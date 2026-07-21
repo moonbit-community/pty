@@ -2,7 +2,7 @@
  * Windows ConPTY implementation for pty.c.
  *
  * This file is included by pty.c and intentionally shares its static helpers
- * and MoonBitPty/pty_handle_t definitions.
+ * and the MoonBitPty definition.
  */
 
 #include "pty_internal.h"
@@ -86,13 +86,6 @@ moonbit_pty_create_pipe(HANDLE *read_end, HANDLE *write_end) {
     return -1;
   }
   return 0;
-}
-
-MOONBIT_FFI_EXPORT
-int32_t
-moonbit_pty_set_invalid_argument(void) {
-  SetLastError(ERROR_INVALID_PARAMETER);
-  return -1;
 }
 
 /* ---- spawn -------------------------------------------------------------- */
@@ -230,18 +223,14 @@ moonbit_pty_spawn(
   CloseHandle(pipe_out_write);
   pipe_out_write = INVALID_HANDLE_VALUE;
 
-  /* Build the handle. */
-  pty_handle_t h;
-  moonbit_pty_init_handle(&h);
-  h.hpc = hpc;
-  h.pipe_in_read = pipe_in_read;
-  h.pipe_in_write = pipe_in_write;
-  h.pipe_out_read = pipe_out_read;
-  h.pipe_out_write = pipe_out_write;
-  h.proc_handle = pi.hProcess;
-  h.thread_handle = pi.hThread;
-
-  pty->handle = h;
+  moonbit_pty_init(pty);
+  pty->hpc = hpc;
+  pty->pipe_in_read = pipe_in_read;
+  pty->pipe_in_write = pipe_in_write;
+  pty->pipe_out_read = pipe_out_read;
+  pty->pipe_out_write = pipe_out_write;
+  pty->proc_handle = pi.hProcess;
+  pty->thread_handle = pi.hThread;
   return 0;
 
 fail_close_hpc:
@@ -279,7 +268,7 @@ moonbit_pty_kill_pid(int32_t pid) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
-  if (!pty || !pty->handle.hpc) {
+  if (!pty || !pty->hpc) {
     SetLastError(ERROR_INVALID_PARAMETER);
     return -1;
   }
@@ -287,7 +276,7 @@ moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
   COORD_T size;
   size.X = (short)cols;
   size.Y = (short)rows;
-  HRESULT hr = pfnResizePseudoConsole(pty->handle.hpc, size);
+  HRESULT hr = pfnResizePseudoConsole(pty->hpc, size);
   if (SUCCEEDED(hr)) {
     return 0;
   }
@@ -301,12 +290,12 @@ MOONBIT_FFI_EXPORT
 HANDLE
 moonbit_pty_take_read_fd(MoonBitPty *pty) {
   if (
-    !pty || !pty->handle.pipe_out_read ||
-    pty->handle.pipe_out_read == INVALID_HANDLE_VALUE
+    !pty || !pty->pipe_out_read ||
+    pty->pipe_out_read == INVALID_HANDLE_VALUE
   )
     return INVALID_HANDLE_VALUE;
-  HANDLE fd = pty->handle.pipe_out_read;
-  pty->handle.pipe_out_read = INVALID_HANDLE_VALUE;
+  HANDLE fd = pty->pipe_out_read;
+  pty->pipe_out_read = INVALID_HANDLE_VALUE;
   return fd;
 }
 
@@ -314,21 +303,21 @@ MOONBIT_FFI_EXPORT
 HANDLE
 moonbit_pty_take_write_fd(MoonBitPty *pty) {
   if (
-    !pty || !pty->handle.pipe_in_write ||
-    pty->handle.pipe_in_write == INVALID_HANDLE_VALUE
+    !pty || !pty->pipe_in_write ||
+    pty->pipe_in_write == INVALID_HANDLE_VALUE
   )
     return INVALID_HANDLE_VALUE;
-  HANDLE fd = pty->handle.pipe_in_write;
-  pty->handle.pipe_in_write = INVALID_HANDLE_VALUE;
+  HANDLE fd = pty->pipe_in_write;
+  pty->pipe_in_write = INVALID_HANDLE_VALUE;
   return fd;
 }
 
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_child_pid(MoonBitPty *pty) {
-  if (!pty || !pty->handle.proc_handle)
+  if (!pty || !pty->proc_handle)
     return -1;
-  return (int32_t)GetProcessId(pty->handle.proc_handle);
+  return (int32_t)GetProcessId(pty->proc_handle);
 }
 
 /* ---- close -------------------------------------------------------------- */
@@ -338,35 +327,34 @@ void
 moonbit_pty_close(MoonBitPty *pty) {
   if (!pty)
     return;
-  pty_handle_t *h = &pty->handle;
-  if (h->proc_handle && h->proc_handle != INVALID_HANDLE_VALUE) {
-    TerminateProcess(h->proc_handle, 0);
-    CloseHandle(h->proc_handle);
-    h->proc_handle = NULL;
+  if (pty->proc_handle && pty->proc_handle != INVALID_HANDLE_VALUE) {
+    TerminateProcess(pty->proc_handle, 0);
+    CloseHandle(pty->proc_handle);
+    pty->proc_handle = NULL;
   }
-  if (h->thread_handle && h->thread_handle != INVALID_HANDLE_VALUE) {
-    CloseHandle(h->thread_handle);
-    h->thread_handle = NULL;
+  if (pty->thread_handle && pty->thread_handle != INVALID_HANDLE_VALUE) {
+    CloseHandle(pty->thread_handle);
+    pty->thread_handle = NULL;
   }
-  if (h->hpc) {
-    pfnClosePseudoConsole(h->hpc);
-    h->hpc = NULL;
+  if (pty->hpc) {
+    pfnClosePseudoConsole(pty->hpc);
+    pty->hpc = NULL;
   }
-  if (h->pipe_in_read && h->pipe_in_read != INVALID_HANDLE_VALUE) {
-    CloseHandle(h->pipe_in_read);
-    h->pipe_in_read = NULL;
+  if (pty->pipe_in_read && pty->pipe_in_read != INVALID_HANDLE_VALUE) {
+    CloseHandle(pty->pipe_in_read);
+    pty->pipe_in_read = NULL;
   }
-  if (h->pipe_in_write && h->pipe_in_write != INVALID_HANDLE_VALUE) {
-    CloseHandle(h->pipe_in_write);
-    h->pipe_in_write = NULL;
+  if (pty->pipe_in_write && pty->pipe_in_write != INVALID_HANDLE_VALUE) {
+    CloseHandle(pty->pipe_in_write);
+    pty->pipe_in_write = NULL;
   }
-  if (h->pipe_out_read && h->pipe_out_read != INVALID_HANDLE_VALUE) {
-    CloseHandle(h->pipe_out_read);
-    h->pipe_out_read = NULL;
+  if (pty->pipe_out_read && pty->pipe_out_read != INVALID_HANDLE_VALUE) {
+    CloseHandle(pty->pipe_out_read);
+    pty->pipe_out_read = NULL;
   }
-  if (h->pipe_out_write && h->pipe_out_write != INVALID_HANDLE_VALUE) {
-    CloseHandle(h->pipe_out_write);
-    h->pipe_out_write = NULL;
+  if (pty->pipe_out_write && pty->pipe_out_write != INVALID_HANDLE_VALUE) {
+    CloseHandle(pty->pipe_out_write);
+    pty->pipe_out_write = NULL;
   }
 }
 

@@ -63,11 +63,21 @@ fn decode_child_error(
 }
 
 ///|
+/// `EINVAL` is 22 on every Unix platform (Linux, macOS, and the BSDs alike).
+#cfg(not(platform="windows"))
+const INVALID_ARGUMENT : Int = 22
+
+///|
+/// Win32 `ERROR_INVALID_PARAMETER`: on Windows `@os_error` codes are
+/// `GetLastError()` values, not CRT errno.
+#cfg(platform="windows")
+const INVALID_ARGUMENT : Int = 87
+
+///|
+/// For validation failures found in MoonBit, where no native call has set a
+/// fresh errno/GetLastError value to report through `check_pty_status`.
 fn raise_invalid_argument(context : String) -> Unit raise @os_error.OSError {
-  // This is for validation failures found in MoonBit before any native call
-  // can set errno/GetLastError. The C shim installs the platform-specific
-  // invalid-argument code, then we report it through the normal os_error path.
-  check_pty_status(pty_set_invalid_argument(), context)
+  raise @os_error.OSError(INVALID_ARGUMENT, context~)
 }
 
 ///|

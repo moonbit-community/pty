@@ -15,13 +15,13 @@
 #include "pty_internal.h"
 
 static void
-moonbit_pty_init_handle(pty_handle_t *h) {
-  memset(h, 0, sizeof(*h));
+moonbit_pty_init(MoonBitPty *pty) {
+  memset(pty, 0, sizeof(*pty));
 #ifndef _WIN32
-  h->master_fd = -1;
-  h->control_fd = -1;
-  h->slave_fd = -1;
-  h->spawned_pid = -1;
+  pty->master_fd = -1;
+  pty->control_fd = -1;
+  pty->slave_fd = -1;
+  pty->spawned_pid = -1;
 #endif
 }
 
@@ -29,7 +29,7 @@ MOONBIT_FFI_EXPORT
 MoonBitPty *
 moonbit_pty_new(void) {
   MoonBitPty *pty = (MoonBitPty *)moonbit_make_bytes(sizeof(MoonBitPty), 0);
-  moonbit_pty_init_handle(&pty->handle);
+  moonbit_pty_init(pty);
   return pty;
 }
 
