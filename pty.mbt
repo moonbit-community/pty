@@ -39,6 +39,30 @@ fn check_pty_status(
 }
 
 ///|
+/// `EIO` is 5 on every Unix platform (this code path is never compiled on
+/// Windows), reported when the child's error pipe carries a malformed payload.
+#cfg(not(platform="windows"))
+const EIO : Int = 5
+
+///|
+/// Decode the child's pre-exec error report from the error pipe.
+///
+/// An empty payload means exec succeeded: the pipe is CLOEXEC, so the parent
+/// just sees EOF. Otherwise the child wrote its errno as a 4-byte
+/// little-endian integer (see `moonbit_pty_report_error` in `pty_unix.c`).
+#cfg(not(platform="windows"))
+fn decode_child_error(
+  data : Bytes,
+  context : String,
+) -> Unit raise @os_error.OSError {
+  match data[:] {
+    [] | [i32le(0)] => ()
+    [i32le(code)] => raise @os_error.OSError(code, context~)
+    _ => raise @os_error.OSError(EIO, context~)
+  }
+}
+
+///|
 fn raise_invalid_argument(context : String) -> Unit raise @os_error.OSError {
   // This is for validation failures found in MoonBit before any native call
   // can set errno/GetLastError. The C shim installs the platform-specific
@@ -73,17 +97,17 @@ pub async fn[X] Pty::spawn(
     raise_invalid_argument("pty.spawn: empty argv")
   }
   let spawn_payload = build_spawn_payload(argv)
-  let handle = pty_new()
+  let handle = PtyHandle::new()
   let spawned = spawn_handle(group, handle, spawn_payload, cols, rows, no_wait?) catch {
     err => {
-      pty_close(handle)
+      handle.close()
       raise err
     }
   }
   // Transfer fd ownership from the C PTY handle to `RawFd`.
-  let read_io = @raw_fd.RawFd::RawFd(pty_take_read_fd(handle)) catch {
+  let read_io = @raw_fd.RawFd::RawFd(handle.take_read_fd()) catch {
     err => {
-      pty_close(handle)
+      handle.close()
       raise err
     }
   }
@@ -181,11 +205,8 @@ fn[X] spawn_handle(
   rows : Int,
   no_wait? : Bool,
 ) -> PtySpawn raise @os_error.OSError {
-  check_pty_status(
-    pty_spawn_windows(handle, command_line, cols, rows),
-    "pty.spawn",
-  )
-  let pid = pty_child_pid(handle)
+  check_pty_status(handle.spawn(command_line, cols, rows), "pty.spawn")
+  let pid = handle.child_pid()
   if pid <= 0 {
     raise_invalid_argument("pty.spawn: child pid")
   }
@@ -193,7 +214,7 @@ fn[X] spawn_handle(
     @process.wait_pid(pid) catch {
       _ if @async.is_being_cancelled() =>
         @async.protect_from_cancel(() => {
-          pty_kill_pid_windows(pid)
+          pty_kill_pid(pid)
           @process.wait_pid(pid)
         })
       err => raise err
@@ -212,9 +233,9 @@ async fn[X] spawn_handle(
   rows : Int,
   no_wait? : Bool,
 ) -> PtySpawn {
-  check_pty_status(pty_open(handle, cols, rows), "pty.spawn")
+  check_pty_status(handle.open(cols, rows), "pty.spawn")
   let mut keep_handle = false
-  defer (if !keep_handle { pty_close(handle) })
+  defer (if !keep_handle { handle.close() })
   let (argv_read, argv_write) = @pipe.pipe()
   defer argv_read.close()
   defer argv_write.close()
@@ -225,7 +246,7 @@ async fn[X] spawn_handle(
   defer slave_read.close()
   defer slave_write.close()
 
-  let bind_err = pty_bind_slave_to_fd(handle, slave_write.fd())
+  let bind_err = handle.bind_slave_to_fd(slave_write.fd())
   check_pty_status(bind_err, "pty.spawn: bind slave")
 
   let self_cmd = @utf8.decode_lossy(pty_self_executable())
@@ -244,7 +265,7 @@ async fn[X] spawn_handle(
     extra_env={ "MOONBIT_PTY_EXEC": "stdio" },
     no_wait?,
   )
-  pty_set_child_pid(handle, child.pid)
+  handle.set_child_pid(child.pid)
 
   argv_read.close()
   err_write.close()
@@ -253,16 +274,14 @@ async fn[X] spawn_handle(
 
   try argv_write.write(argv_flat) catch {
     err => {
-      let child_err = pty_decode_child_error(err_read.read_all().binary())
-      check_pty_status(child_err, "pty.spawn")
+      decode_child_error(err_read.read_all().binary(), "pty.spawn")
       raise err
     }
   } noraise {
     _ => {
       argv_write.close()
-      let child_err = pty_decode_child_error(err_read.read_all().binary())
+      decode_child_error(err_read.read_all().binary(), "pty.spawn")
       err_read.close()
-      check_pty_status(child_err, "pty.spawn")
     }
   }
   keep_handle = true
@@ -304,10 +323,10 @@ async fn register_write_io(
   handle : PtyHandle,
   read_io : @raw_fd.RawFd,
 ) -> @raw_fd.RawFd {
-  @raw_fd.RawFd::RawFd(pty_take_write_fd_windows(handle)) catch {
+  @raw_fd.RawFd::RawFd(handle.take_write_fd()) catch {
     err => {
       read_io.close()
-      pty_close(handle)
+      handle.close()
       raise err
     }
   }
@@ -351,13 +370,13 @@ pub fn Pty::resize(
   cols~ : Int,
   rows~ : Int,
 ) -> Unit raise @os_error.OSError {
-  check_pty_status(pty_resize(self.handle, cols, rows), "Pty::resize")
+  check_pty_status(self.handle.resize(cols, rows), "Pty::resize")
 }
 
 ///|
 /// Get the spawned child PID when available.
 pub fn Pty::pid(self : Pty) -> Int {
-  pty_child_pid(self.handle)
+  self.handle.child_pid()
 }
 
 ///|
@@ -394,9 +413,9 @@ pub fn Pty::cancel(self : Pty) -> Unit {
 /// Request cancellation of the child process.
 #cfg(platform="windows")
 pub fn Pty::cancel(self : Pty) -> Unit {
-  let pid = pty_child_pid(self.handle)
+  let pid = self.handle.child_pid()
   if pid > 0 {
-    pty_kill_pid_windows(pid)
+    pty_kill_pid(pid)
   }
 }
 
@@ -407,7 +426,8 @@ pub fn Pty::cancel(self : Pty) -> Unit {
 /// OS PTY handle.
 ///
 /// Resource lifetime is explicit: call this when the PTY is no longer needed.
-/// The native handle finalizer does not close OS resources.
+/// The native handle is plain GC-managed memory with no finalizer, so OS
+/// resources are never released by collection.
 ///
 /// Safe to call multiple times because the underlying close paths are
 /// idempotent.
@@ -415,7 +435,7 @@ pub fn Pty::cancel(self : Pty) -> Unit {
 pub fn Pty::close(self : Pty) -> Unit {
   self.cancel()
   self.read_io.close()
-  pty_close(self.handle)
+  self.handle.close()
 }
 
 ///|
@@ -425,7 +445,8 @@ pub fn Pty::close(self : Pty) -> Unit {
 /// OS PTY handle.
 ///
 /// Resource lifetime is explicit: call this when the PTY is no longer needed.
-/// The native handle finalizer does not close OS resources.
+/// The native handle is plain GC-managed memory with no finalizer, so OS
+/// resources are never released by collection.
 ///
 /// Safe to call multiple times because the underlying close paths are
 /// idempotent.
@@ -434,5 +455,5 @@ pub fn Pty::close(self : Pty) -> Unit {
   self.cancel()
   self.read_io.close()
   self.write_io.close()
-  pty_close(self.handle)
+  self.handle.close()
 }

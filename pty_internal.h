@@ -31,9 +31,10 @@ typedef struct pty_handle {
 } pty_handle_t;
 
 /*
- * MoonBitPty is the external-object wrapper seen by MoonBit.
- * moonbit_make_external_object allocates (payload_size) bytes after
- * the GC header; our payload is the platform handle.
+ * MoonBitPty is the payload MoonBit sees as `PtyHandle`. It lives in a
+ * GC-managed Bytes allocation (value-as-Bytes pattern): plain POD state
+ * with no finalizer — OS resources are released explicitly by Pty::close,
+ * never by GC collection.
  */
 typedef struct {
   pty_handle_t handle;
@@ -45,8 +46,6 @@ typedef struct {
 #define MOONBIT_PTY_INTERNAL extern
 #endif
 
-MOONBIT_PTY_INTERNAL void
-moonbit_pty_finalizer(void *ptr);
 MOONBIT_PTY_INTERNAL void
 moonbit_pty_init_handle(pty_handle_t *h);
 

@@ -99,7 +99,7 @@ moonbit_pty_set_invalid_argument(void) {
 
 MOONBIT_FFI_EXPORT
 int32_t
-moonbit_pty_spawn_windows(
+moonbit_pty_spawn(
   MoonBitPty *pty,
   const uint8_t *command_line_bytes,
   int32_t cols,
@@ -262,7 +262,7 @@ fail:
 
 MOONBIT_FFI_EXPORT
 void
-moonbit_pty_kill_pid_windows(int32_t pid) {
+moonbit_pty_kill_pid(int32_t pid) {
   if (pid <= 0) {
     return;
   }
@@ -312,7 +312,7 @@ moonbit_pty_take_read_fd(MoonBitPty *pty) {
 
 MOONBIT_FFI_EXPORT
 HANDLE
-moonbit_pty_take_write_fd_windows(MoonBitPty *pty) {
+moonbit_pty_take_write_fd(MoonBitPty *pty) {
   if (
     !pty || !pty->handle.pipe_in_write ||
     pty->handle.pipe_in_write == INVALID_HANDLE_VALUE
