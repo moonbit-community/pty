@@ -2,14 +2,14 @@
 /// Handle to a spawned PTY plus its event-loop registration.
 ///
 /// On Unix the PTY master fd is used for both reading and writing, so
-/// `read_io` and `write_io` are the same `RawFd` wrapper around the same
-/// `IoHandle`. The two fields exist so that reader and writer code paths
-/// can use intent-revealing names. On Windows they point at the separate
-/// ConPTY input/output pipe HANDLEs.
+/// `read_io` and `write_io` are the same `RawFdStream` wrapper around the
+/// same `IoHandle`. The two fields exist so that reader and writer code
+/// paths can use intent-revealing names. On Windows they point at the
+/// separate ConPTY input/output pipe HANDLEs.
 struct Pty {
   handle : PtyHandle
-  read_io : @raw_fd.RawFd
-  write_io : @raw_fd.RawFd
+  read_io : @raw_fd.RawFdStream
+  write_io : @raw_fd.RawFdStream
   spawned : PtySpawn
 }
 
@@ -114,8 +114,8 @@ pub async fn[X] Pty::spawn(
       raise err
     }
   }
-  // Transfer fd ownership from the C PTY handle to `RawFd`.
-  let read_io = @raw_fd.RawFd::RawFd(handle.take_read_fd()) catch {
+  // Transfer fd ownership from the C PTY handle to `RawFdStream`.
+  let read_io = @raw_fd.RawFdStream(handle.take_read_fd()) catch {
     err => {
       handle.close()
       raise err
@@ -321,8 +321,8 @@ fn parse_self_args(flat : Bytes) -> Array[String] {
 #cfg(not(platform="windows"))
 fn register_write_io(
   _handle : PtyHandle,
-  read_io : @raw_fd.RawFd,
-) -> @raw_fd.RawFd {
+  read_io : @raw_fd.RawFdStream,
+) -> @raw_fd.RawFdStream {
   read_io
 }
 
@@ -331,9 +331,9 @@ fn register_write_io(
 #cfg(platform="windows")
 async fn register_write_io(
   handle : PtyHandle,
-  read_io : @raw_fd.RawFd,
-) -> @raw_fd.RawFd {
-  @raw_fd.RawFd::RawFd(handle.take_write_fd()) catch {
+  read_io : @raw_fd.RawFdStream,
+) -> @raw_fd.RawFdStream {
+  @raw_fd.RawFdStream(handle.take_write_fd()) catch {
     err => {
       read_io.close()
       handle.close()
@@ -343,11 +343,12 @@ async fn register_write_io(
 }
 
 ///|
-/// Get the async reader for this PTY.
+/// Get the async reader for this PTY, exposing the `@io.Reader` interface
+/// (`read`, `read_some`, `read_until`, ...).
 ///
-/// The returned `RawFd` is owned by the `Pty`; do not call `close()`
-/// or `detach()` on it. Use `Pty::close` to release the registration.
-pub fn Pty::reader(self : Pty) -> @raw_fd.RawFd {
+/// The returned `RawFdStream` is owned by the `Pty`; do not call `close()`
+/// on it. Use `Pty::close` to release the registration.
+pub fn Pty::reader(self : Pty) -> @raw_fd.RawFdStream {
   self.read_io
 }
 
@@ -360,15 +361,7 @@ pub fn Pty::reader(self : Pty) -> @raw_fd.RawFd {
 ///
 /// Raises `@os_error.OSError` if the underlying write fails.
 pub async fn Pty::write(self : Pty, data : Bytes) -> Unit {
-  let total = data.length()
-  let mut offset = 0
-  while offset < total {
-    let n = self.write_io.write(data, offset~, len=total - offset)
-    if n <= 0 {
-      raise_invalid_argument("Pty::write: short write")
-    }
-    offset += n
-  }
+  self.write_io.write(data)
 }
 
 ///|
@@ -432,7 +425,7 @@ pub fn Pty::cancel(self : Pty) -> Unit {
 ///|
 /// Close the PTY, releasing all resources.
 ///
-/// Closes the owned `RawFd` wrapper(s) and then tears down the underlying
+/// Closes the owned `RawFdStream` wrapper(s) and then tears down the underlying
 /// OS PTY handle.
 ///
 /// Resource lifetime is explicit: call this when the PTY is no longer needed.
@@ -451,7 +444,7 @@ pub fn Pty::close(self : Pty) -> Unit {
 ///|
 /// Close the PTY, releasing all resources.
 ///
-/// Closes the owned `RawFd` wrapper(s) and then tears down the underlying
+/// Closes the owned `RawFdStream` wrapper(s) and then tears down the underlying
 /// OS PTY handle.
 ///
 /// Resource lifetime is explicit: call this when the PTY is no longer needed.

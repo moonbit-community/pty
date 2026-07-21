@@ -11,7 +11,7 @@ event loop instead of blocking the thread.
   let pty = @pty.spawn(group, ["/bin/sh", "-c", "echo hello"])
   defer pty.close()
 
-  let reader = pty.reader()               // @raw_fd.RawFd
+  let reader = pty.reader()               // @raw_fd.RawFdStream, implements @io.Reader
   pty.write(@utf8.encode("ls\n"))         // async
   pty.resize(cols=120, rows=40)
   let pid : Int = pty.pid()
