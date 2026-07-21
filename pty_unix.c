@@ -103,16 +103,22 @@ moonbit_pty_self_executable(void) {
 #endif
 }
 
-/* Blocking write of exactly `len` bytes of `errno` back to the parent.
- * Retries on EINTR and short writes. The return value is intentionally
- * ignored by callers: we're on a fatal path and if the error pipe is
- * broken the parent will see EOF and fall back to its generic failure
- * path. */
+/* Blocking write of `errno` back to the parent as a 4-byte little-endian
+ * integer (decoded by `decode_child_error` in pty.mbt). Retries on EINTR
+ * and short writes. The return value is intentionally ignored by callers:
+ * we're on a fatal path and if the error pipe is broken the parent will
+ * see EOF and fall back to its generic failure path. */
 static void
 moonbit_pty_report_error(int err_fd, int err) {
-  int32_t val = (int32_t)err;
-  const char *p = (const char *)&val;
-  size_t remaining = sizeof(val);
+  uint32_t val = (uint32_t)err;
+  uint8_t buf[4] = {
+      (uint8_t)(val & 0xff),
+      (uint8_t)((val >> 8) & 0xff),
+      (uint8_t)((val >> 16) & 0xff),
+      (uint8_t)((val >> 24) & 0xff),
+  };
+  const char *p = (const char *)buf;
+  size_t remaining = sizeof(buf);
   while (remaining > 0) {
     ssize_t n = write(err_fd, p, remaining);
     if (n < 0) {
@@ -389,29 +395,6 @@ moonbit_pty_set_child_pid(MoonBitPty *pty, int32_t pid) {
     return;
   }
   pty->handle.spawned_pid = (int)pid;
-}
-
-MOONBIT_FFI_EXPORT
-int32_t
-moonbit_pty_decode_child_error(const uint8_t *data) {
-  if (!data) {
-    return 0;
-  }
-  int32_t len = (int32_t)Moonbit_array_length(data);
-  if (len == 0) {
-    return 0;
-  }
-  if (len != (int32_t)sizeof(int32_t)) {
-    errno = EIO;
-    return -1;
-  }
-  int32_t out = 0;
-  memcpy(&out, data, sizeof(out));
-  if (out == 0) {
-    return 0;
-  }
-  errno = (int)out;
-  return -1;
 }
 
 /* ---- resize ------------------------------------------------------------- */

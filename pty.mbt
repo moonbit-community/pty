@@ -39,6 +39,30 @@ fn check_pty_status(
 }
 
 ///|
+/// `EIO` is 5 on every Unix platform (this code path is never compiled on
+/// Windows), reported when the child's error pipe carries a malformed payload.
+#cfg(not(platform="windows"))
+const EIO : Int = 5
+
+///|
+/// Decode the child's pre-exec error report from the error pipe.
+///
+/// An empty payload means exec succeeded: the pipe is CLOEXEC, so the parent
+/// just sees EOF. Otherwise the child wrote its errno as a 4-byte
+/// little-endian integer (see `moonbit_pty_report_error` in `pty_unix.c`).
+#cfg(not(platform="windows"))
+fn decode_child_error(
+  data : Bytes,
+  context : String,
+) -> Unit raise @os_error.OSError {
+  match data[:] {
+    [] | [i32le(0)] => ()
+    [i32le(code)] => raise @os_error.OSError(code, context~)
+    _ => raise @os_error.OSError(EIO, context~)
+  }
+}
+
+///|
 fn raise_invalid_argument(context : String) -> Unit raise @os_error.OSError {
   // This is for validation failures found in MoonBit before any native call
   // can set errno/GetLastError. The C shim installs the platform-specific
@@ -253,16 +277,14 @@ async fn[X] spawn_handle(
 
   try argv_write.write(argv_flat) catch {
     err => {
-      let child_err = pty_decode_child_error(err_read.read_all().binary())
-      check_pty_status(child_err, "pty.spawn")
+      decode_child_error(err_read.read_all().binary(), "pty.spawn")
       raise err
     }
   } noraise {
     _ => {
       argv_write.close()
-      let child_err = pty_decode_child_error(err_read.read_all().binary())
+      decode_child_error(err_read.read_all().binary(), "pty.spawn")
       err_read.close()
-      check_pty_status(child_err, "pty.spawn")
     }
   }
   keep_handle = true

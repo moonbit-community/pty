@@ -40,11 +40,6 @@ extern "c" fn pty_set_child_pid(handle : PtyHandle, pid : Int) -> Unit = "moonbi
 
 ///|
 #cfg(not(platform="windows"))
-#borrow(data)
-extern "c" fn pty_decode_child_error(data : Bytes) -> Int = "moonbit_pty_decode_child_error"
-
-///|
-#cfg(not(platform="windows"))
 extern "c" fn pty_self_executable() -> Bytes = "moonbit_pty_self_executable"
 
 ///|
