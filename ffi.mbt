@@ -16,12 +16,12 @@ extern "c" fn pty_set_invalid_argument() -> Int = "moonbit_pty_set_invalid_argum
 ///|
 #cfg(platform="windows")
 #borrow(self, command_line)
-extern "c" fn PtyHandle::spawn_windows(
+extern "c" fn PtyHandle::spawn(
   self : PtyHandle,
   command_line : Bytes,
   cols : Int,
   rows : Int,
-) -> Int = "moonbit_pty_spawn_windows"
+) -> Int = "moonbit_pty_spawn"
 
 ///|
 #cfg(not(platform="windows"))
@@ -64,11 +64,11 @@ extern "c" fn PtyHandle::take_read_fd(self : PtyHandle) -> @types.Fd = "moonbit_
 ///|
 #cfg(platform="windows")
 #borrow(self)
-extern "c" fn PtyHandle::take_write_fd_windows(self : PtyHandle) -> @types.Fd = "moonbit_pty_take_write_fd_windows"
+extern "c" fn PtyHandle::take_write_fd(self : PtyHandle) -> @types.Fd = "moonbit_pty_take_write_fd"
 
 ///|
 #cfg(platform="windows")
-extern "c" fn pty_kill_pid_windows(pid : Int) -> Unit = "moonbit_pty_kill_pid_windows"
+extern "c" fn pty_kill_pid(pid : Int) -> Unit = "moonbit_pty_kill_pid"
 
 ///|
 #borrow(self)

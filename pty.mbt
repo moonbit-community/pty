@@ -205,7 +205,7 @@ fn[X] spawn_handle(
   rows : Int,
   no_wait? : Bool,
 ) -> PtySpawn raise @os_error.OSError {
-  check_pty_status(handle.spawn_windows(command_line, cols, rows), "pty.spawn")
+  check_pty_status(handle.spawn(command_line, cols, rows), "pty.spawn")
   let pid = handle.child_pid()
   if pid <= 0 {
     raise_invalid_argument("pty.spawn: child pid")
@@ -214,7 +214,7 @@ fn[X] spawn_handle(
     @process.wait_pid(pid) catch {
       _ if @async.is_being_cancelled() =>
         @async.protect_from_cancel(() => {
-          pty_kill_pid_windows(pid)
+          pty_kill_pid(pid)
           @process.wait_pid(pid)
         })
       err => raise err
@@ -323,7 +323,7 @@ async fn register_write_io(
   handle : PtyHandle,
   read_io : @raw_fd.RawFd,
 ) -> @raw_fd.RawFd {
-  @raw_fd.RawFd::RawFd(handle.take_write_fd_windows()) catch {
+  @raw_fd.RawFd::RawFd(handle.take_write_fd()) catch {
     err => {
       read_io.close()
       handle.close()
@@ -415,7 +415,7 @@ pub fn Pty::cancel(self : Pty) -> Unit {
 pub fn Pty::cancel(self : Pty) -> Unit {
   let pid = self.handle.child_pid()
   if pid > 0 {
-    pty_kill_pid_windows(pid)
+    pty_kill_pid(pid)
   }
 }
 
