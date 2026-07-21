@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -179,6 +180,18 @@ moonbit_pty_read_argv_buf(int argv_fd, char **out_buf, size_t *out_len) {
     if (n < 0) {
       if (errno == EINTR)
         continue;
+      /* moonbitlang/async pipes carry O_NONBLOCK on the shared open file
+       * description, so the inherited fd may be non-blocking. Wait until
+       * readable instead of treating EAGAIN as a fatal error. */
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        struct pollfd pfd = {.fd = argv_fd, .events = POLLIN};
+        if (poll(&pfd, 1, -1) < 0 && errno != EINTR) {
+          int saved = errno;
+          free(buf);
+          return saved;
+        }
+        continue;
+      }
       int saved = errno;
       free(buf);
       return saved;
