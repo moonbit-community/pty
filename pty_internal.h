@@ -13,7 +13,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct pty_handle {
+/*
+ * MoonBitPty is the payload MoonBit sees as `PtyHandle`. It lives in a
+ * GC-managed Bytes allocation (value-as-Bytes pattern): plain POD state
+ * with no finalizer — OS resources are released explicitly by Pty::close,
+ * never by GC collection.
+ */
+typedef struct MoonBitPty {
 #ifdef _WIN32
   void *hpc;            /* HPCON */
   void *pipe_in_read;   /* stdin  pipe: read  end */
@@ -28,16 +34,6 @@ typedef struct pty_handle {
   int slave_fd;
   int spawned_pid;
 #endif
-} pty_handle_t;
-
-/*
- * MoonBitPty is the payload MoonBit sees as `PtyHandle`. It lives in a
- * GC-managed Bytes allocation (value-as-Bytes pattern): plain POD state
- * with no finalizer — OS resources are released explicitly by Pty::close,
- * never by GC collection.
- */
-typedef struct {
-  pty_handle_t handle;
 } MoonBitPty;
 
 #ifdef MOONBIT_PTY_IMPLEMENTATION
@@ -47,7 +43,7 @@ typedef struct {
 #endif
 
 MOONBIT_PTY_INTERNAL void
-moonbit_pty_init_handle(pty_handle_t *h);
+moonbit_pty_init(MoonBitPty *pty);
 
 #undef MOONBIT_PTY_INTERNAL
 

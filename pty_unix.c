@@ -2,7 +2,7 @@
  * Unix PTY implementation for pty.c.
  *
  * This file is included by pty.c and intentionally shares its static helpers
- * and MoonBitPty/pty_handle_t definitions.
+ * and the MoonBitPty definition.
  */
 
 #include "pty_internal.h"
@@ -365,30 +365,28 @@ moonbit_pty_open(MoonBitPty *pty, int32_t cols, int32_t rows) {
   }
   moonbit_pty_set_nonblocking(master_fd);
 
-  pty_handle_t h;
-  moonbit_pty_init_handle(&h);
-  h.master_fd = master_fd;
-  h.control_fd = control_fd;
-  h.slave_fd = slave_fd;
-  pty->handle = h;
+  moonbit_pty_init(pty);
+  pty->master_fd = master_fd;
+  pty->control_fd = control_fd;
+  pty->slave_fd = slave_fd;
   return 0;
 }
 
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_bind_slave_to_fd(MoonBitPty *pty, int32_t target_fd) {
-  if (!pty || pty->handle.slave_fd < 0 || target_fd < 0) {
+  if (!pty || pty->slave_fd < 0 || target_fd < 0) {
     errno = EINVAL;
     return -1;
   }
-  int slave_fd = pty->handle.slave_fd;
+  int slave_fd = pty->slave_fd;
   if (dup2(slave_fd, target_fd) < 0) {
     return -1;
   }
   if (slave_fd != target_fd) {
     close(slave_fd);
   }
-  pty->handle.slave_fd = -1;
+  pty->slave_fd = -1;
   return 0;
 }
 
@@ -398,7 +396,7 @@ moonbit_pty_set_child_pid(MoonBitPty *pty, int32_t pid) {
   if (!pty) {
     return;
   }
-  pty->handle.spawned_pid = (int)pid;
+  pty->spawned_pid = (int)pid;
 }
 
 /* ---- resize ------------------------------------------------------------- */
@@ -406,7 +404,7 @@ moonbit_pty_set_child_pid(MoonBitPty *pty, int32_t pid) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
-  if (!pty || pty->handle.control_fd < 0) {
+  if (!pty || pty->control_fd < 0) {
     errno = EINVAL;
     return -1;
   }
@@ -416,7 +414,7 @@ moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
   ws.ws_col = (unsigned short)cols;
   ws.ws_row = (unsigned short)rows;
 
-  if (ioctl(pty->handle.control_fd, TIOCSWINSZ, &ws) == 0)
+  if (ioctl(pty->control_fd, TIOCSWINSZ, &ws) == 0)
     return 0;
   return -1;
 }
@@ -426,19 +424,19 @@ moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_take_read_fd(MoonBitPty *pty) {
-  if (!pty || pty->handle.master_fd < 0)
+  if (!pty || pty->master_fd < 0)
     return -1;
-  int fd = pty->handle.master_fd;
-  pty->handle.master_fd = -1;
+  int fd = pty->master_fd;
+  pty->master_fd = -1;
   return (int32_t)fd;
 }
 
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_child_pid(MoonBitPty *pty) {
-  if (!pty || pty->handle.spawned_pid < 0)
+  if (!pty || pty->spawned_pid < 0)
     return -1;
-  return (int32_t)pty->handle.spawned_pid;
+  return (int32_t)pty->spawned_pid;
 }
 
 /* ---- close -------------------------------------------------------------- */
@@ -448,20 +446,19 @@ void
 moonbit_pty_close(MoonBitPty *pty) {
   if (!pty)
     return;
-  pty_handle_t *h = &pty->handle;
-  if (h->master_fd >= 0) {
-    close(h->master_fd);
-    h->master_fd = -1;
+  if (pty->master_fd >= 0) {
+    close(pty->master_fd);
+    pty->master_fd = -1;
   }
-  if (h->control_fd >= 0) {
-    close(h->control_fd);
-    h->control_fd = -1;
+  if (pty->control_fd >= 0) {
+    close(pty->control_fd);
+    pty->control_fd = -1;
   }
-  if (h->slave_fd >= 0) {
-    close(h->slave_fd);
-    h->slave_fd = -1;
+  if (pty->slave_fd >= 0) {
+    close(pty->slave_fd);
+    pty->slave_fd = -1;
   }
-  h->spawned_pid = -1;
+  pty->spawned_pid = -1;
 }
 
 #endif
