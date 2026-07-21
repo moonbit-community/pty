@@ -426,7 +426,8 @@ pub fn Pty::cancel(self : Pty) -> Unit {
 /// OS PTY handle.
 ///
 /// Resource lifetime is explicit: call this when the PTY is no longer needed.
-/// The native handle finalizer does not close OS resources.
+/// The native handle is plain GC-managed memory with no finalizer, so OS
+/// resources are never released by collection.
 ///
 /// Safe to call multiple times because the underlying close paths are
 /// idempotent.
@@ -444,7 +445,8 @@ pub fn Pty::close(self : Pty) -> Unit {
 /// OS PTY handle.
 ///
 /// Resource lifetime is explicit: call this when the PTY is no longer needed.
-/// The native handle finalizer does not close OS resources.
+/// The native handle is plain GC-managed memory with no finalizer, so OS
+/// resources are never released by collection.
 ///
 /// Safe to call multiple times because the underlying close paths are
 /// idempotent.

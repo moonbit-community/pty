@@ -1,5 +1,8 @@
 ///|
-priv type PtyHandle
+/// Value-as-Bytes wrapper around the C-side `MoonBitPty` struct: plain POD
+/// state in a GC-managed Bytes allocation, no finalizer. OS resources are
+/// released explicitly by `Pty::close`, never by GC collection.
+priv struct PtyHandle(Bytes)
 
 ///|
 extern "c" fn PtyHandle::new() -> PtyHandle = "moonbit_pty_new"

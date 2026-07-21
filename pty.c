@@ -5,8 +5,9 @@
  * clangd can parse those files directly while the build still uses one
  * translation unit.
  *
- * All exported functions use MOONBIT_FFI_EXPORT and follow the
- * MoonBit external-object pattern (moonbit_make_external_object).
+ * All exported functions use MOONBIT_FFI_EXPORT. The PTY handle is plain
+ * POD state stored in a GC-managed Bytes allocation (value-as-Bytes
+ * pattern) — no finalizer; resource lifetime is explicit via Pty::close.
  */
 
 #include <moonbit.h>
@@ -27,24 +28,9 @@ moonbit_pty_init_handle(pty_handle_t *h) {
 MOONBIT_FFI_EXPORT
 MoonBitPty *
 moonbit_pty_new(void) {
-  MoonBitPty *pty = (MoonBitPty *)moonbit_make_external_object(
-    moonbit_pty_finalizer, sizeof(MoonBitPty)
-  );
+  MoonBitPty *pty = (MoonBitPty *)moonbit_make_bytes(sizeof(MoonBitPty), 0);
   moonbit_pty_init_handle(&pty->handle);
   return pty;
-}
-
-/* -------------------------------------------------------------------------- */
-/*  Finalizer (invoked by GC)                                                 */
-/* -------------------------------------------------------------------------- */
-
-static void
-moonbit_pty_finalizer(void *ptr) {
-  (void)ptr;
-  /* Resource lifetime is explicit, matching moonbitlang/async RawFd/IoHandle.
-   * Users must call Pty::close; GC finalization is intentionally not a
-   * fallback close because that would make child process lifetime depend on
-   * nondeterministic collection. */
 }
 
 #include "pty_win32.c"
