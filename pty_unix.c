@@ -11,6 +11,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -63,10 +64,12 @@ MOONBIT_FFI_EXPORT
 moonbit_bytes_t
 moonbit_pty_self_executable(void) {
 #if defined(__APPLE__)
-  uint32_t size = 0;
-  if (_NSGetExecutablePath(NULL, &size) != -1 || size == 0) {
-    return moonbit_pty_empty_bytes();
+  char buf[PATH_MAX];
+  uint32_t size = sizeof(buf);
+  if (_NSGetExecutablePath(buf, &size) == 0) {
+    return moonbit_pty_copy_bytes(buf, strlen(buf));
   }
+  /* dyld paths may exceed PATH_MAX; `size` now holds the required length. */
   char *path = (char *)malloc((size_t)size);
   if (!path) {
     return moonbit_pty_empty_bytes();
@@ -79,13 +82,22 @@ moonbit_pty_self_executable(void) {
   free(path);
   return out;
 #elif defined(__linux__)
-  size_t cap = 256;
-  for (;;) {
+  char buf[PATH_MAX];
+  ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf));
+  if (n < 0) {
+    return moonbit_pty_empty_bytes();
+  }
+  if ((size_t)n < sizeof(buf)) {
+    return moonbit_pty_copy_bytes(buf, (size_t)n);
+  }
+  /* readlink truncates silently: a full buffer may mean a longer target,
+   * so retry on the heap with doubling capacity. */
+  for (size_t cap = sizeof(buf) * 2;; cap *= 2) {
     char *path = (char *)malloc(cap);
     if (!path) {
       return moonbit_pty_empty_bytes();
     }
-    ssize_t n = readlink("/proc/self/exe", path, cap);
+    n = readlink("/proc/self/exe", path, cap);
     if (n < 0) {
       free(path);
       return moonbit_pty_empty_bytes();
@@ -96,7 +108,6 @@ moonbit_pty_self_executable(void) {
       return out;
     }
     free(path);
-    cap *= 2;
   }
 #else
   return moonbit_pty_empty_bytes();
