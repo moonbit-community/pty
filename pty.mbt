@@ -251,15 +251,19 @@ async fn[X] spawn_handle(
   slave_read.close()
   slave_write.close()
 
-  let argv_write_result = try? argv_write.write(argv_flat)
-  argv_write.close()
-
-  let child_err = pty_decode_child_error(err_read.read_all().binary())
-  err_read.close()
-  check_pty_status(child_err, "pty.spawn")
-  match argv_write_result {
-    Ok(_) => ()
-    Err(err) => raise err
+  try argv_write.write(argv_flat) catch {
+    err => {
+      let child_err = pty_decode_child_error(err_read.read_all().binary())
+      check_pty_status(child_err, "pty.spawn")
+      raise err
+    }
+  } noraise {
+    _ => {
+      argv_write.close()
+      let child_err = pty_decode_child_error(err_read.read_all().binary())
+      err_read.close()
+      check_pty_status(child_err, "pty.spawn")
+    }
   }
   keep_handle = true
   PtySpawn(child)

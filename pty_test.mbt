@@ -76,8 +76,12 @@ async test "idle PTY read waits instead of EOF" {
     defer pty.close()
     let reader = pty.reader()
     let buf : FixedArray[Byte] = FixedArray::make(64, b'\x00')
-    let result = try? @async.with_timeout(100, () => reader.read(buf))
-    debug_inspect(result, content="Err(TimeoutError)")
+    debug_inspect(
+      @async.with_timeout_opt(100, () => reader.read(buf)),
+      content=(
+        #|None
+      ),
+    )
   })
 }
 
