@@ -2,7 +2,7 @@
 priv type PtyHandle
 
 ///|
-extern "c" fn pty_new() -> PtyHandle = "moonbit_pty_new"
+extern "c" fn PtyHandle::new() -> PtyHandle = "moonbit_pty_new"
 
 ///|
 /// Set the platform's last OS error to "invalid argument" and return -1.
@@ -15,9 +15,9 @@ extern "c" fn pty_set_invalid_argument() -> Int = "moonbit_pty_set_invalid_argum
 
 ///|
 #cfg(platform="windows")
-#borrow(handle, command_line)
-extern "c" fn pty_spawn_windows(
-  handle : PtyHandle,
+#borrow(self, command_line)
+extern "c" fn PtyHandle::spawn_windows(
+  self : PtyHandle,
   command_line : Bytes,
   cols : Int,
   rows : Int,
@@ -25,18 +25,21 @@ extern "c" fn pty_spawn_windows(
 
 ///|
 #cfg(not(platform="windows"))
-#borrow(handle)
-extern "c" fn pty_open(handle : PtyHandle, cols : Int, rows : Int) -> Int = "moonbit_pty_open"
+#borrow(self)
+extern "c" fn PtyHandle::open(self : PtyHandle, cols : Int, rows : Int) -> Int = "moonbit_pty_open"
 
 ///|
 #cfg(not(platform="windows"))
-#borrow(handle)
-extern "c" fn pty_bind_slave_to_fd(handle : PtyHandle, fd : @types.Fd) -> Int = "moonbit_pty_bind_slave_to_fd"
+#borrow(self)
+extern "c" fn PtyHandle::bind_slave_to_fd(
+  self : PtyHandle,
+  fd : @types.Fd,
+) -> Int = "moonbit_pty_bind_slave_to_fd"
 
 ///|
 #cfg(not(platform="windows"))
-#borrow(handle)
-extern "c" fn pty_set_child_pid(handle : PtyHandle, pid : Int) -> Unit = "moonbit_pty_set_child_pid"
+#borrow(self)
+extern "c" fn PtyHandle::set_child_pid(self : PtyHandle, pid : Int) -> Unit = "moonbit_pty_set_child_pid"
 
 ///|
 #cfg(not(platform="windows"))
@@ -47,26 +50,30 @@ extern "c" fn pty_self_executable() -> Bytes = "moonbit_pty_self_executable"
 extern "c" fn pty_self_args_flat() -> Bytes = "moonbit_pty_self_args_flat"
 
 ///|
-#borrow(handle)
-extern "c" fn pty_resize(handle : PtyHandle, cols : Int, rows : Int) -> Int = "moonbit_pty_resize"
+#borrow(self)
+extern "c" fn PtyHandle::resize(
+  self : PtyHandle,
+  cols : Int,
+  rows : Int,
+) -> Int = "moonbit_pty_resize"
 
 ///|
-#borrow(handle)
-extern "c" fn pty_take_read_fd(handle : PtyHandle) -> @types.Fd = "moonbit_pty_take_read_fd"
+#borrow(self)
+extern "c" fn PtyHandle::take_read_fd(self : PtyHandle) -> @types.Fd = "moonbit_pty_take_read_fd"
 
 ///|
 #cfg(platform="windows")
-#borrow(handle)
-extern "c" fn pty_take_write_fd_windows(handle : PtyHandle) -> @types.Fd = "moonbit_pty_take_write_fd_windows"
+#borrow(self)
+extern "c" fn PtyHandle::take_write_fd_windows(self : PtyHandle) -> @types.Fd = "moonbit_pty_take_write_fd_windows"
 
 ///|
 #cfg(platform="windows")
 extern "c" fn pty_kill_pid_windows(pid : Int) -> Unit = "moonbit_pty_kill_pid_windows"
 
 ///|
-#borrow(handle)
-extern "c" fn pty_child_pid(handle : PtyHandle) -> Int = "moonbit_pty_child_pid"
+#borrow(self)
+extern "c" fn PtyHandle::child_pid(self : PtyHandle) -> Int = "moonbit_pty_child_pid"
 
 ///|
-#borrow(handle)
-extern "c" fn pty_close(handle : PtyHandle) -> Unit = "moonbit_pty_close"
+#borrow(self)
+extern "c" fn PtyHandle::close(self : PtyHandle) -> Unit = "moonbit_pty_close"

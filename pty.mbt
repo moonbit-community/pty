@@ -97,17 +97,17 @@ pub async fn[X] Pty::spawn(
     raise_invalid_argument("pty.spawn: empty argv")
   }
   let spawn_payload = build_spawn_payload(argv)
-  let handle = pty_new()
+  let handle = PtyHandle::new()
   let spawned = spawn_handle(group, handle, spawn_payload, cols, rows, no_wait?) catch {
     err => {
-      pty_close(handle)
+      handle.close()
       raise err
     }
   }
   // Transfer fd ownership from the C PTY handle to `RawFd`.
-  let read_io = @raw_fd.RawFd::RawFd(pty_take_read_fd(handle)) catch {
+  let read_io = @raw_fd.RawFd::RawFd(handle.take_read_fd()) catch {
     err => {
-      pty_close(handle)
+      handle.close()
       raise err
     }
   }
@@ -205,11 +205,8 @@ fn[X] spawn_handle(
   rows : Int,
   no_wait? : Bool,
 ) -> PtySpawn raise @os_error.OSError {
-  check_pty_status(
-    pty_spawn_windows(handle, command_line, cols, rows),
-    "pty.spawn",
-  )
-  let pid = pty_child_pid(handle)
+  check_pty_status(handle.spawn_windows(command_line, cols, rows), "pty.spawn")
+  let pid = handle.child_pid()
   if pid <= 0 {
     raise_invalid_argument("pty.spawn: child pid")
   }
@@ -236,9 +233,9 @@ async fn[X] spawn_handle(
   rows : Int,
   no_wait? : Bool,
 ) -> PtySpawn {
-  check_pty_status(pty_open(handle, cols, rows), "pty.spawn")
+  check_pty_status(handle.open(cols, rows), "pty.spawn")
   let mut keep_handle = false
-  defer (if !keep_handle { pty_close(handle) })
+  defer (if !keep_handle { handle.close() })
   let (argv_read, argv_write) = @pipe.pipe()
   defer argv_read.close()
   defer argv_write.close()
@@ -249,7 +246,7 @@ async fn[X] spawn_handle(
   defer slave_read.close()
   defer slave_write.close()
 
-  let bind_err = pty_bind_slave_to_fd(handle, slave_write.fd())
+  let bind_err = handle.bind_slave_to_fd(slave_write.fd())
   check_pty_status(bind_err, "pty.spawn: bind slave")
 
   let self_cmd = @utf8.decode_lossy(pty_self_executable())
@@ -268,7 +265,7 @@ async fn[X] spawn_handle(
     extra_env={ "MOONBIT_PTY_EXEC": "stdio" },
     no_wait?,
   )
-  pty_set_child_pid(handle, child.pid)
+  handle.set_child_pid(child.pid)
 
   argv_read.close()
   err_write.close()
@@ -326,10 +323,10 @@ async fn register_write_io(
   handle : PtyHandle,
   read_io : @raw_fd.RawFd,
 ) -> @raw_fd.RawFd {
-  @raw_fd.RawFd::RawFd(pty_take_write_fd_windows(handle)) catch {
+  @raw_fd.RawFd::RawFd(handle.take_write_fd_windows()) catch {
     err => {
       read_io.close()
-      pty_close(handle)
+      handle.close()
       raise err
     }
   }
@@ -373,13 +370,13 @@ pub fn Pty::resize(
   cols~ : Int,
   rows~ : Int,
 ) -> Unit raise @os_error.OSError {
-  check_pty_status(pty_resize(self.handle, cols, rows), "Pty::resize")
+  check_pty_status(self.handle.resize(cols, rows), "Pty::resize")
 }
 
 ///|
 /// Get the spawned child PID when available.
 pub fn Pty::pid(self : Pty) -> Int {
-  pty_child_pid(self.handle)
+  self.handle.child_pid()
 }
 
 ///|
@@ -416,7 +413,7 @@ pub fn Pty::cancel(self : Pty) -> Unit {
 /// Request cancellation of the child process.
 #cfg(platform="windows")
 pub fn Pty::cancel(self : Pty) -> Unit {
-  let pid = pty_child_pid(self.handle)
+  let pid = self.handle.child_pid()
   if pid > 0 {
     pty_kill_pid_windows(pid)
   }
@@ -437,7 +434,7 @@ pub fn Pty::cancel(self : Pty) -> Unit {
 pub fn Pty::close(self : Pty) -> Unit {
   self.cancel()
   self.read_io.close()
-  pty_close(self.handle)
+  self.handle.close()
 }
 
 ///|
@@ -456,5 +453,5 @@ pub fn Pty::close(self : Pty) -> Unit {
   self.cancel()
   self.read_io.close()
   self.write_io.close()
-  pty_close(self.handle)
+  self.handle.close()
 }
