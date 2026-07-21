@@ -339,13 +339,6 @@ moonbit_pty_constructor(void) {
 
 MOONBIT_FFI_EXPORT
 int32_t
-moonbit_pty_set_invalid_argument(void) {
-  errno = EINVAL;
-  return -1;
-}
-
-MOONBIT_FFI_EXPORT
-int32_t
 moonbit_pty_open(MoonBitPty *pty, int32_t cols, int32_t rows) {
   if (!pty) {
     errno = EINVAL;

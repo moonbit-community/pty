@@ -8,15 +8,6 @@ priv struct PtyHandle(Bytes)
 extern "c" fn PtyHandle::new() -> PtyHandle = "moonbit_pty_new"
 
 ///|
-/// Set the platform's last OS error to "invalid argument" and return -1.
-///
-/// Some argument errors are detected in MoonBit before we call a syscall, so
-/// there is no fresh errno/GetLastError value for `@os_error.check_errno` to
-/// read. This shim lets those errors use the same 0/-1 + check_errno path as
-/// real native calls without hardcoding POSIX errno values on Windows.
-extern "c" fn pty_set_invalid_argument() -> Int = "moonbit_pty_set_invalid_argument"
-
-///|
 #cfg(platform="windows")
 #borrow(self, command_line)
 extern "c" fn PtyHandle::spawn(

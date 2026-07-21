@@ -88,13 +88,6 @@ moonbit_pty_create_pipe(HANDLE *read_end, HANDLE *write_end) {
   return 0;
 }
 
-MOONBIT_FFI_EXPORT
-int32_t
-moonbit_pty_set_invalid_argument(void) {
-  SetLastError(ERROR_INVALID_PARAMETER);
-  return -1;
-}
-
 /* ---- spawn -------------------------------------------------------------- */
 
 MOONBIT_FFI_EXPORT
