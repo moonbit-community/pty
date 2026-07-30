@@ -94,8 +94,8 @@ MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_spawn(
   MoonBitPty *pty,
-  const uint8_t *command_line_bytes,
-  const uint8_t *cwd_bytes,
+  moonbit_string_t command_line,
+  moonbit_string_t cwd,
   int32_t has_cwd,
   int32_t cols,
   int32_t rows
@@ -111,32 +111,35 @@ moonbit_pty_spawn(
     return -1;
   }
 
-  if (!command_line_bytes) {
+  if (!command_line) {
     SetLastError(ERROR_INVALID_PARAMETER);
     return -1;
   }
-  if (has_cwd && !cwd_bytes) {
+  if (has_cwd && !cwd) {
     SetLastError(ERROR_INVALID_PARAMETER);
     return -1;
   }
-  int32_t command_line_len = (int32_t)Moonbit_array_length(command_line_bytes);
+  int32_t command_line_len = (int32_t)Moonbit_array_length(command_line);
   if (command_line_len <= 0) {
     SetLastError(ERROR_INVALID_PARAMETER);
     return -1;
   }
   /*
-   * CreateProcessA takes a mutable LPSTR and may write into it while parsing.
-   * Keep MoonBit's GC-managed Bytes untouched by copying only its logical
-   * contents into an owned C buffer, then add our own NUL terminator instead
-   * of relying on the runtime's internal Bytes padding.
+   * CreateProcessW takes a mutable LPWSTR and may write into it while parsing.
+   * Keep MoonBit's GC-managed UTF-16 String untouched by copying its logical
+   * contents into an owned buffer and adding the required NUL terminator.
    */
-  char *mutable_command_line = (char *)malloc((size_t)command_line_len + 1);
+  WCHAR *mutable_command_line =
+    (WCHAR *)malloc(((size_t)command_line_len + 1) * sizeof(WCHAR));
   if (!mutable_command_line) {
     SetLastError(ERROR_NOT_ENOUGH_MEMORY);
     return -1;
   }
-  memcpy(mutable_command_line, command_line_bytes, (size_t)command_line_len);
-  mutable_command_line[command_line_len] = '\0';
+  memcpy(
+    mutable_command_line, command_line,
+    (size_t)command_line_len * sizeof(WCHAR)
+  );
+  mutable_command_line[command_line_len] = L'\0';
 
   HANDLE pipe_in_read = INVALID_HANDLE_VALUE;
   HANDLE pipe_in_write = INVALID_HANDLE_VALUE;
@@ -168,7 +171,7 @@ moonbit_pty_spawn(
     goto fail;
   }
 
-  /* Prepare STARTUPINFOEXA with the pseudo-console attribute. */
+  /* Prepare STARTUPINFOEXW with the pseudo-console attribute. */
   SIZE_T attr_size = 0;
   InitializeProcThreadAttributeList(NULL, 1, 0, &attr_size);
   LPPROC_THREAD_ATTRIBUTE_LIST attr_list =
@@ -195,9 +198,9 @@ moonbit_pty_spawn(
     goto fail_close_hpc;
   }
 
-  STARTUPINFOEXA si;
+  STARTUPINFOEXW si;
   ZeroMemory(&si, sizeof(si));
-  si.StartupInfo.cb = sizeof(STARTUPINFOEXA);
+  si.StartupInfo.cb = sizeof(STARTUPINFOEXW);
   /*
    * When the parent stdio is redirected, Windows can otherwise copy those
    * pipe handles into the ConPTY child and bypass the pseudoconsole.
@@ -209,12 +212,12 @@ moonbit_pty_spawn(
   ZeroMemory(&pi, sizeof(pi));
 
   /*
-   * MoonBit Bytes include a trailing NUL byte. `has_cwd` keeps an omitted
-   * cwd distinct from an explicitly provided empty path.
+   * Native MoonBit Strings are NUL-terminated UTF-16. `has_cwd` keeps an
+   * omitted cwd distinct from an explicitly provided empty path.
    */
-  const char *current_directory =
-    has_cwd ? (const char *)cwd_bytes : NULL;
-  BOOL ok = CreateProcessA(
+  const WCHAR *current_directory =
+    has_cwd ? (const WCHAR *)cwd : NULL;
+  BOOL ok = CreateProcessW(
     NULL, mutable_command_line, NULL, NULL, FALSE, EXTENDED_STARTUPINFO_PRESENT,
     NULL, current_directory, &si.StartupInfo, &pi
   );
@@ -222,7 +225,7 @@ moonbit_pty_spawn(
   DeleteProcThreadAttributeList(attr_list);
   HeapFree(GetProcessHeap(), 0, attr_list);
 
-  /* CreateProcessA has consumed the command line; safe to free now. */
+  /* CreateProcessW has consumed the command line; safe to free now. */
   free(mutable_command_line);
   mutable_command_line = NULL;
 

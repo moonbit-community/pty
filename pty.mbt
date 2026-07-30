@@ -194,7 +194,7 @@ fn StringBuilder::write_windows_arg(
 
 ///|
 #cfg(platform="windows")
-fn build_spawn_payload(argv : Array[String]) -> Bytes {
+fn build_spawn_payload(argv : Array[String]) -> String {
   let command_line = StringBuilder::new()
   for i, arg in argv {
     if i > 0 {
@@ -202,7 +202,7 @@ fn build_spawn_payload(argv : Array[String]) -> Bytes {
     }
     command_line.write_windows_arg(arg[:])
   }
-  @utf8.encode(command_line.to_string()[:])
+  command_line.to_string()
 }
 
 ///|
@@ -225,15 +225,15 @@ fn build_spawn_payload(argv : Array[String]) -> Bytes {
 fn[X] spawn_handle(
   group : @async.TaskGroup[X],
   handle : PtyHandle,
-  command_line : Bytes,
+  command_line : String,
   cols : Int,
   rows : Int,
   cwd? : StringView,
   no_wait? : Bool,
 ) -> PtySpawn raise @os_error.OSError {
-  let cwd_bytes = cwd.map(view => @utf8.encode(view)).unwrap_or(b"")
+  let cwd_string = cwd.map(view => view.to_owned()).unwrap_or("")
   check_pty_status(
-    handle.spawn(command_line, cwd_bytes, cwd is Some(_), cols, rows),
+    handle.spawn(command_line, cwd_string, cwd is Some(_), cols, rows),
     "pty.spawn",
   )
   let pid = handle.child_pid()

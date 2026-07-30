@@ -27,7 +27,7 @@ event loop instead of blocking the thread.
 task group, registers the master fd with the async event loop, and returns a
 handle that can be used while the child is running. On Unix, `argv[0]` is
 resolved via `PATH` using `execvp`; on Windows, the command is launched through
-`CreateProcessA`. The optional `cwd` argument sets the child's initial working
+`CreateProcessW`. The optional `cwd` argument sets the child's initial working
 directory; when omitted, the child inherits the parent's working directory.
 
 The deprecated method form `Pty::spawn` is kept for compatibility; prefer
@@ -61,7 +61,7 @@ try {
 |----------|--------|-----|
 | macOS | `openpty()` + `moonbitlang/async` self-spawn helper | avoids `fork()` with mimalloc |
 | Linux | `openpty()` + `moonbitlang/async` self-spawn helper | shares the async process spawn path |
-| Windows | ConPTY + `CreateProcessA()` | No fork involved |
+| Windows | ConPTY + `CreateProcessW()` | No fork involved |
 
 ## Windows: ConPTY process startup
 
@@ -74,8 +74,8 @@ Windows uses the ConPTY API instead of Unix-style PTYs:
      reads from `outputReadSide`
 2. Call `CreatePseudoConsole(size, inputReadSide, outputWriteSide, ...)`.
 3. Prepare `STARTUPINFOEX` with `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`.
-4. Call `CreateProcessA(..., EXTENDED_STARTUPINFO_PRESENT, ...)`.
-5. After `CreateProcessA` succeeds, close `inputReadSide` and
+4. Call `CreateProcessW(..., EXTENDED_STARTUPINFO_PRESENT, ...)`.
+5. After `CreateProcessW` succeeds, close `inputReadSide` and
    `outputWriteSide` in the parent. The parent keeps only `inputWriteSide` and
    `outputReadSide` for async I/O.
 
@@ -103,17 +103,13 @@ This is separate from the core ConPTY attachment. The actual PTY association is
 still made by `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`; `STARTF_USESTDHANDLES`
 only prevents inherited stdio redirection from competing with that attachment.
 
-### Current Windows argv limitations
+### Windows argv encoding
 
-The Windows path currently joins `argv` into a `CreateProcessA` command line
-with simple space separation. This works for ordinary commands such as
-`["cmd.exe", "/c", "echo", "READY"]`, but it does not yet implement full
-Windows command-line quoting. Arguments containing spaces, quotes, or
-backslash-quote sequences may be parsed differently by the child process.
-
-Because the implementation calls `CreateProcessA`, non-ASCII executable paths
-and arguments also depend on the process ANSI code page. A future Windows path
-should switch to `CreateProcessW` and proper Windows command-line escaping.
+Windows receives one command-line string rather than an `argv` array. The
+Windows path quotes each argument while constructing that command line, then
+passes the command line and optional working directory to `CreateProcessW` as
+UTF-16. Non-ASCII executable paths, arguments, and working directories
+therefore do not depend on the process ANSI code page.
 
 ## macOS: the mimalloc + fork problem
 
