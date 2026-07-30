@@ -95,6 +95,8 @@ int32_t
 moonbit_pty_spawn(
   MoonBitPty *pty,
   const uint8_t *command_line_bytes,
+  const uint8_t *cwd_bytes,
+  int32_t has_cwd,
   int32_t cols,
   int32_t rows
 ) {
@@ -110,6 +112,10 @@ moonbit_pty_spawn(
   }
 
   if (!command_line_bytes) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return -1;
+  }
+  if (has_cwd && !cwd_bytes) {
     SetLastError(ERROR_INVALID_PARAMETER);
     return -1;
   }
@@ -202,9 +208,15 @@ moonbit_pty_spawn(
   PROCESS_INFORMATION pi;
   ZeroMemory(&pi, sizeof(pi));
 
+  /*
+   * MoonBit Bytes include a trailing NUL byte. `has_cwd` keeps an omitted
+   * cwd distinct from an explicitly provided empty path.
+   */
+  const char *current_directory =
+    has_cwd ? (const char *)cwd_bytes : NULL;
   BOOL ok = CreateProcessA(
     NULL, mutable_command_line, NULL, NULL, FALSE, EXTENDED_STARTUPINFO_PRESENT,
-    NULL, NULL, &si.StartupInfo, &pi
+    NULL, current_directory, &si.StartupInfo, &pi
   );
 
   DeleteProcThreadAttributeList(attr_list);

@@ -8,6 +8,10 @@ import {
   "moonbitlang/async/os_error",
 }
 
+import {
+  "moonbitlang/async/fs",
+} for "test"
+
 supported_targets = "native"
 
 options(

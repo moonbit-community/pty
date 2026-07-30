@@ -20,7 +20,7 @@ pub fn Pty::reader(Self) -> @raw_fd.RawFdStream
 pub fn Pty::resize(Self, cols~ : Int, rows~ : Int) -> Unit raise @os_error.OSError
 #as_free_fn
 #deprecated
-pub async fn[X] Pty::spawn(@async.TaskGroup[X], Array[String], cols? : Int, rows? : Int, no_wait? : Bool) -> Self
+pub async fn[X] Pty::spawn(@async.TaskGroup[X], Array[String], cwd? : StringView, cols? : Int, rows? : Int, no_wait? : Bool) -> Self
 pub async fn Pty::wait(Self) -> Int
 pub async fn Pty::write(Self, Bytes) -> Unit
 
