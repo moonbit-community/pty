@@ -113,6 +113,21 @@ async test "spawn resolves program via PATH" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "spawn uses requested cwd" {
+  @async.with_task_group(group => {
+    let cwd = @fs.realpath("testdata/路径")
+    let pty = @pty.spawn(
+      group,
+      ["sh", "-c", "test -f cwd-marker.txt && echo CWD_OK"],
+      cwd~,
+    )
+    defer pty.close()
+    assert_true(read_until_contains(pty, "CWD_OK") is Some(_))
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "resize works after spawn" {
   @async.with_task_group(group => {
     let pty = @pty.spawn(group, ["/bin/sh"], cols=100, rows=30)
@@ -166,6 +181,21 @@ async test "cmd outputs through ConPTY" {
     assert_true(pty.pid() > 0)
     assert_true(read_until_contains(pty, "WIN_READY") is Some(_))
     debug_inspect(pty.wait(), content="0")
+  })
+}
+
+///|
+#cfg(platform="windows")
+async test "Windows spawn uses requested cwd" {
+  @async.with_task_group(group => {
+    let cwd = @fs.realpath("testdata/路径")
+    let pty = @pty.spawn(
+      group,
+      ["cmd.exe", "/c", "if", "exist", "cwd-marker.txt", "echo", "CWD_OK"],
+      cwd~,
+    )
+    defer pty.close()
+    assert_true(read_until_contains(pty, "CWD_OK") is Some(_))
   })
 }
 

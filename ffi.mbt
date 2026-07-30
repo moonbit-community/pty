@@ -9,10 +9,12 @@ extern "c" fn PtyHandle::new() -> PtyHandle = "moonbit_pty_new"
 
 ///|
 #cfg(platform="windows")
-#borrow(self, command_line)
+#borrow(self, command_line, cwd)
 extern "c" fn PtyHandle::spawn(
   self : PtyHandle,
-  command_line : Bytes,
+  command_line : String,
+  cwd : String,
+  has_cwd : Bool,
   cols : Int,
   rows : Int,
 ) -> Int = "moonbit_pty_spawn"

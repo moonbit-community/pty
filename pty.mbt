@@ -86,6 +86,9 @@ fn raise_invalid_argument(context : String) -> Unit raise @os_error.OSError {
 /// `argv[0]` is the program to execute (resolved via PATH by `execvp`),
 /// and `argv[1..]` are its arguments.
 ///
+/// `cwd` sets the child's initial working directory. When omitted, the child
+/// inherits the parent's working directory.
+///
 /// `cols` and `rows` default to 80x24 if not specified.
 ///
 /// Must be called from inside an async event-loop context — the PTY's
@@ -99,6 +102,7 @@ fn raise_invalid_argument(context : String) -> Unit raise @os_error.OSError {
 pub async fn[X] Pty::spawn(
   group : @async.TaskGroup[X],
   argv : Array[String],
+  cwd? : StringView,
   cols? : Int = 80,
   rows? : Int = 24,
   no_wait? : Bool,
@@ -106,9 +110,20 @@ pub async fn[X] Pty::spawn(
   if argv.is_empty() {
     raise_invalid_argument("pty.spawn: empty argv")
   }
+  if cwd is Some(cwd) && cwd.find("\u{0}") is Some(_) {
+    raise_invalid_argument("pty.spawn: cwd contains NUL")
+  }
   let spawn_payload = build_spawn_payload(argv)
   let handle = PtyHandle::new()
-  let spawned = spawn_handle(group, handle, spawn_payload, cols, rows, no_wait?) catch {
+  let spawned = spawn_handle(
+    group,
+    handle,
+    spawn_payload,
+    cols,
+    rows,
+    cwd?,
+    no_wait?,
+  ) catch {
     err => {
       handle.close()
       raise err
@@ -179,7 +194,7 @@ fn StringBuilder::write_windows_arg(
 
 ///|
 #cfg(platform="windows")
-fn build_spawn_payload(argv : Array[String]) -> Bytes {
+fn build_spawn_payload(argv : Array[String]) -> String {
   let command_line = StringBuilder::new()
   for i, arg in argv {
     if i > 0 {
@@ -187,7 +202,7 @@ fn build_spawn_payload(argv : Array[String]) -> Bytes {
     }
     command_line.write_windows_arg(arg[:])
   }
-  @utf8.encode(command_line.to_string()[:])
+  command_line.to_string()
 }
 
 ///|
@@ -210,12 +225,17 @@ fn build_spawn_payload(argv : Array[String]) -> Bytes {
 fn[X] spawn_handle(
   group : @async.TaskGroup[X],
   handle : PtyHandle,
-  command_line : Bytes,
+  command_line : String,
   cols : Int,
   rows : Int,
+  cwd? : StringView,
   no_wait? : Bool,
 ) -> PtySpawn raise @os_error.OSError {
-  check_pty_status(handle.spawn(command_line, cols, rows), "pty.spawn")
+  let cwd_string = cwd.map(view => view.to_owned()).unwrap_or("")
+  check_pty_status(
+    handle.spawn(command_line, cwd_string, cwd is Some(_), cols, rows),
+    "pty.spawn",
+  )
   let pid = handle.child_pid()
   if pid <= 0 {
     raise_invalid_argument("pty.spawn: child pid")
@@ -241,6 +261,7 @@ async fn[X] spawn_handle(
   argv_flat : Bytes,
   cols : Int,
   rows : Int,
+  cwd? : StringView,
   no_wait? : Bool,
 ) -> PtySpawn {
   check_pty_status(handle.open(cols, rows), "pty.spawn")
@@ -273,6 +294,7 @@ async fn[X] spawn_handle(
     stdout=slave_write,
     stderr=err_write,
     extra_env={ "MOONBIT_PTY_EXEC": "stdio" },
+    cwd?,
     no_wait?,
   )
   handle.set_child_pid(child.pid)
