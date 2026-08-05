@@ -368,10 +368,38 @@ moonbit_pty_open(MoonBitPty *pty, int32_t cols, int32_t rows) {
   if (openpty(&master_fd, &slave_fd, NULL, NULL, &ws) < 0) {
     return -1;
   }
+  /* Async tests and applications may spawn several PTYs concurrently. Do not
+   * let one child inherit another terminal's master or slave: any inherited
+   * slave keeps that other terminal's reader from ever observing EOF. */
+  int master_fd_flags = fcntl(master_fd, F_GETFD, 0);
+  int slave_fd_flags = fcntl(slave_fd, F_GETFD, 0);
+  if (
+    master_fd_flags < 0 || slave_fd_flags < 0 ||
+    fcntl(master_fd, F_SETFD, master_fd_flags | FD_CLOEXEC) < 0 ||
+    fcntl(slave_fd, F_SETFD, slave_fd_flags | FD_CLOEXEC) < 0
+  ) {
+    int saved_errno = errno;
+    close(master_fd);
+    close(slave_fd);
+    errno = saved_errno;
+    return -1;
+  }
   int control_fd = dup(master_fd);
   if (control_fd < 0) {
     int saved_errno = errno;
     close(master_fd);
+    close(slave_fd);
+    errno = saved_errno;
+    return -1;
+  }
+  int control_fd_flags = fcntl(control_fd, F_GETFD, 0);
+  if (
+    control_fd_flags < 0 ||
+    fcntl(control_fd, F_SETFD, control_fd_flags | FD_CLOEXEC) < 0
+  ) {
+    int saved_errno = errno;
+    close(master_fd);
+    close(control_fd);
     close(slave_fd);
     errno = saved_errno;
     return -1;
@@ -394,6 +422,16 @@ moonbit_pty_bind_slave_to_fd(MoonBitPty *pty, int32_t target_fd) {
   }
   int slave_fd = pty->slave_fd;
   if (dup2(slave_fd, target_fd) < 0) {
+    return -1;
+  }
+  /* @process.spawn duplicates this fd onto the child's stdout before exec,
+   * which clears CLOEXEC on that intentional destination. Keeping CLOEXEC on
+   * the parent-side source prevents unrelated concurrent spawns inheriting it. */
+  int target_fd_flags = fcntl(target_fd, F_GETFD, 0);
+  if (
+    target_fd_flags < 0 ||
+    fcntl(target_fd, F_SETFD, target_fd_flags | FD_CLOEXEC) < 0
+  ) {
     return -1;
   }
   if (slave_fd != target_fd) {
@@ -450,6 +488,22 @@ moonbit_pty_child_pid(MoonBitPty *pty) {
   if (!pty || pty->spawned_pid < 0)
     return -1;
   return (int32_t)pty->spawned_pid;
+}
+
+/* ---- shutdown ----------------------------------------------------------- */
+
+MOONBIT_FFI_EXPORT
+void
+moonbit_pty_shutdown(MoonBitPty *pty) {
+  if (!pty || pty->spawned_pid <= 0)
+    return;
+  /*
+   * login_tty() makes the spawned child a session and process-group leader.
+   * Kill that group so descendants cannot keep the PTY slave open and leave a
+   * master read parked forever. The master itself remains open until the
+   * MoonBit-side read/write operation returns and releases its RawFdStream.
+   */
+  kill(-pty->spawned_pid, SIGKILL);
 }
 
 /* ---- close -------------------------------------------------------------- */

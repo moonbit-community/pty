@@ -85,8 +85,8 @@ async test "idle PTY read waits instead of EOF" {
 
 ///|
 /// The rendezvous makes the spawned task enter `read` before `close` runs.
-/// Waiting for `0` proves the reader task reached EOF normally; cancellation
-/// would instead make `Task::wait` raise.
+/// The task keeps reading because shutdown may produce trailing terminal data;
+/// reaching `0` proves it eventually observed EOF without being cancelled.
 #cfg(not(platform="windows"))
 async test "POSIX close lets a pending read finish with EOF" {
   @async.with_timeout(3000, () => {
@@ -97,20 +97,25 @@ async test "POSIX close lets a pending read finish with EOF" {
       let read_task = group.spawn(() => {
         started.put(())
         let buf : FixedArray[Byte] = FixedArray::make(64, b'\x00')
-        pty.read(buf)
+        for ;; {
+          if pty.read(buf) == 0 {
+            break
+          }
+        }
       })
       started.get()
       @async.pause()
       assert_true(read_task.try_wait() is None)
       pty.close()
-      assert_eq(read_task.wait(), 0)
+      read_task.wait()
     })
   })
 }
 
 ///|
 /// Windows uses a synchronous `ReadFile` in async's worker pool. Closing the
-/// ConPTY output source must make it return EOF without cancelling that task.
+/// ConPTY output source may first return buffered output; the same reader task
+/// must then reach EOF without being cancelled.
 #cfg(platform="windows")
 async test "Windows close lets a pending read finish with EOF" {
   @async.with_timeout(3000, () => {
@@ -123,13 +128,17 @@ async test "Windows close lets a pending read finish with EOF" {
       let read_task = group.spawn(() => {
         started.put(())
         let buf : FixedArray[Byte] = FixedArray::make(64, b'\x00')
-        pty.read(buf)
+        for ;; {
+          if pty.read(buf) == 0 {
+            break
+          }
+        }
       })
       started.get()
       @async.pause()
       assert_true(read_task.try_wait() is None)
       pty.close()
-      assert_eq(read_task.wait(), 0)
+      read_task.wait()
     })
   })
 }

@@ -548,10 +548,16 @@ pub fn Pty::close(self : Pty) -> Unit {
     return
   }
   self.closed = true
+  // Cancel the child-process task, not the external task reading from `Pty`.
+  // The native shutdown below supplies the synchronous wakeup that process
+  // cancellation alone does not guarantee.
   self.cancel()
-  // Close the shared master immediately only when no read/write is using it.
-  // Otherwise child shutdown closes the slave side, making the pending
-  // operation finish before its defer releases the master.
+  // Only force the slave-side producer to stop when an operation prevents us
+  // from closing the shared master immediately. Avoid signalling a saved PID
+  // after an already-reaped child could have been reused by the OS.
+  if self.active_reads > 0 || self.active_writes > 0 {
+    self.handle.shutdown()
+  }
   self.close_idle_streams()
   self.handle.close()
   self.close_idle_streams()
@@ -576,9 +582,14 @@ pub fn Pty::close(self : Pty) -> Unit {
     return
   }
   self.closed = true
+  // `cancel` terminates the child process; it does not cancel the external
+  // task whose synchronous ReadFile/WriteFile is still running.
   self.cancel()
-  // Close idle communication pipes before `ClosePseudoConsole`. A pending
-  // output read stays open and drains shutdown output on async's worker thread.
+  // Stop the ConPTY producer only when closing a pipe would race with a
+  // synchronous ReadFile/WriteFile still running in async's worker pool.
+  if self.active_reads > 0 || self.active_writes > 0 {
+    self.handle.shutdown()
+  }
   self.close_idle_streams()
   self.handle.close()
   self.close_idle_streams()

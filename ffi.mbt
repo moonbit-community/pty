@@ -71,5 +71,11 @@ extern "c" fn pty_kill_pid(pid : Int) -> Unit = "moonbit_pty_kill_pid"
 extern "c" fn PtyHandle::child_pid(self : PtyHandle) -> Int = "moonbit_pty_child_pid"
 
 ///|
+/// Stop the terminal source so an in-flight read can finish normally.
+/// Raw read/write handles remain owned by `Pty` until their operations return.
+#borrow(self)
+extern "c" fn PtyHandle::shutdown(self : PtyHandle) -> Unit = "moonbit_pty_shutdown"
+
+///|
 #borrow(self)
 extern "c" fn PtyHandle::close(self : PtyHandle) -> Unit = "moonbit_pty_close"
