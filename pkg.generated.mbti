@@ -3,8 +3,8 @@ package "moonbit-community/pty"
 
 import {
   "moonbitlang/async",
+  "moonbitlang/async/io",
   "moonbitlang/async/os_error",
-  "moonbitlang/async/raw_fd",
 }
 
 // Values
@@ -16,15 +16,14 @@ type Pty
 pub fn Pty::cancel(Self) -> Unit
 pub fn Pty::close(Self) -> Unit
 pub fn Pty::pid(Self) -> Int
-pub fn Pty::reader(Self) -> @raw_fd.RawFdStream
 pub fn Pty::resize(Self, cols~ : Int, rows~ : Int) -> Unit raise @os_error.OSError
 #as_free_fn
 #deprecated
 pub async fn[X] Pty::spawn(@async.TaskGroup[X], Array[String], cwd? : StringView, cols? : Int, rows? : Int, no_wait? : Bool) -> Self
 pub async fn Pty::wait(Self) -> Int
 pub async fn Pty::write(Self, Bytes) -> Unit
+pub impl @io.Reader for Pty
 
 // Type aliases
 
 // Traits
-

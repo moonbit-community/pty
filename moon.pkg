@@ -4,6 +4,7 @@ import {
   "moonbitlang/async/pipe",
   "moonbitlang/async/process",
   "moonbitlang/async/raw_fd",
+  "moonbitlang/async/io",
   "moonbitlang/async/types",
   "moonbitlang/async/os_error",
 }
