@@ -8,6 +8,7 @@
 #ifndef MOONBIT_PTY_INTERNAL_H
 #define MOONBIT_PTY_INTERNAL_H
 
+#include <assert.h>
 #include <moonbit.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -22,29 +23,23 @@
 typedef struct MoonBitPty {
 #ifdef _WIN32
   void *hpc;            /* HPCON */
+  /* Pipe HANDLE ownership uses INVALID_HANDLE_VALUE after release. */
   void *pipe_in_read;   /* stdin  pipe: read  end */
   void *pipe_in_write;  /* stdin  pipe: write end */
   void *pipe_out_read;  /* stdout pipe: read  end */
   void *pipe_out_write; /* stdout pipe: write end */
+  /* Process and thread handles use NULL; (HANDLE)-1 means current process. */
   void *proc_handle;    /* child PROCESS_INFORMATION.hProcess */
   void *thread_handle;  /* child PROCESS_INFORMATION.hThread  */
 #else
+  /* File descriptor zero is valid, so ownership is tracked separately. */
   int master_fd;
+  int32_t master_fd_is_open;
   int control_fd;
+  int32_t control_fd_is_open;
   int slave_fd;
-  int spawned_pid;
+  int32_t slave_fd_is_open;
 #endif
 } MoonBitPty;
-
-#ifdef MOONBIT_PTY_IMPLEMENTATION
-#define MOONBIT_PTY_INTERNAL static
-#else
-#define MOONBIT_PTY_INTERNAL extern
-#endif
-
-MOONBIT_PTY_INTERNAL void
-moonbit_pty_init(MoonBitPty *pty);
-
-#undef MOONBIT_PTY_INTERNAL
 
 #endif

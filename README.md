@@ -36,7 +36,9 @@ The deprecated method form `Pty::spawn` is kept for compatibility; prefer
 `Pty::wait` waits for the child process and returns its exit code. `Pty::close`
 stops the child and releases PTY resources. A read already in progress may
 return buffered shutdown output before finishing with EOF; its task is not
-cancelled. Call `wait` explicitly when the exit code matters.
+cancelled. `Pty::pid` returns the PID captured at spawn time, including after
+`close`, rather than using a numeric sentinel for unavailable native state.
+Call `wait` explicitly when the exit code matters.
 
 ## Errors
 

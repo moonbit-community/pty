@@ -353,18 +353,15 @@ moonbit_pty_constructor(void) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_open(MoonBitPty *pty, int32_t cols, int32_t rows) {
-  if (!pty) {
-    errno = EINVAL;
-    return -1;
-  }
+  assert(pty);
 
-  struct winsize ws;
-  memset(&ws, 0, sizeof(ws));
-  ws.ws_col = (unsigned short)cols;
-  ws.ws_row = (unsigned short)rows;
+  struct winsize ws = {
+    .ws_col = (unsigned short)cols,
+    .ws_row = (unsigned short)rows,
+  };
 
-  int master_fd = -1;
-  int slave_fd = -1;
+  int master_fd;
+  int slave_fd;
   if (openpty(&master_fd, &slave_fd, NULL, NULL, &ws) < 0) {
     return -1;
   }
@@ -406,20 +403,21 @@ moonbit_pty_open(MoonBitPty *pty, int32_t cols, int32_t rows) {
   }
   moonbit_pty_set_nonblocking(master_fd);
 
-  moonbit_pty_init(pty);
   pty->master_fd = master_fd;
+  pty->master_fd_is_open = 1;
   pty->control_fd = control_fd;
+  pty->control_fd_is_open = 1;
   pty->slave_fd = slave_fd;
+  pty->slave_fd_is_open = 1;
   return 0;
 }
 
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_bind_slave_to_fd(MoonBitPty *pty, int32_t target_fd) {
-  if (!pty || pty->slave_fd < 0 || target_fd < 0) {
-    errno = EINVAL;
-    return -1;
-  }
+  assert(pty);
+  assert(pty->slave_fd_is_open);
+  assert(target_fd >= 0);
   int slave_fd = pty->slave_fd;
   if (dup2(slave_fd, target_fd) < 0) {
     return -1;
@@ -437,17 +435,8 @@ moonbit_pty_bind_slave_to_fd(MoonBitPty *pty, int32_t target_fd) {
   if (slave_fd != target_fd) {
     close(slave_fd);
   }
-  pty->slave_fd = -1;
+  pty->slave_fd_is_open = 0;
   return 0;
-}
-
-MOONBIT_FFI_EXPORT
-void
-moonbit_pty_set_child_pid(MoonBitPty *pty, int32_t pid) {
-  if (!pty) {
-    return;
-  }
-  pty->spawned_pid = (int)pid;
 }
 
 /* ---- resize ------------------------------------------------------------- */
@@ -455,15 +444,13 @@ moonbit_pty_set_child_pid(MoonBitPty *pty, int32_t pid) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
-  if (!pty || pty->control_fd < 0) {
-    errno = EINVAL;
-    return -1;
-  }
+  assert(pty);
+  assert(pty->control_fd_is_open);
 
-  struct winsize ws;
-  memset(&ws, 0, sizeof(ws));
-  ws.ws_col = (unsigned short)cols;
-  ws.ws_row = (unsigned short)rows;
+  struct winsize ws = {
+    .ws_col = (unsigned short)cols,
+    .ws_row = (unsigned short)rows,
+  };
 
   if (ioctl(pty->control_fd, TIOCSWINSZ, &ws) == 0)
     return 0;
@@ -475,27 +462,24 @@ moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_take_read_fd(MoonBitPty *pty) {
-  if (!pty || pty->master_fd < 0)
-    return -1;
+  assert(pty);
+  assert(pty->master_fd_is_open);
   int fd = pty->master_fd;
-  pty->master_fd = -1;
+  pty->master_fd_is_open = 0;
   return (int32_t)fd;
-}
-
-MOONBIT_FFI_EXPORT
-int32_t
-moonbit_pty_child_pid(MoonBitPty *pty) {
-  if (!pty || pty->spawned_pid < 0)
-    return -1;
-  return (int32_t)pty->spawned_pid;
 }
 
 /* ---- shutdown ----------------------------------------------------------- */
 
 MOONBIT_FFI_EXPORT
 void
-moonbit_pty_shutdown(MoonBitPty *pty) {
-  if (!pty || pty->spawned_pid <= 0)
+moonbit_pty_shutdown(MoonBitPty *pty, int32_t pid) {
+  assert(pty);
+  /* kill(-1, ...) broadcasts to every process the caller may signal. A
+   * successfully spawned non-system child cannot have PID 1, but keep that
+   * rule as a runtime guard here so corrupted input can never become a
+   * broadcast signal in release builds. */
+  if (pid <= 1)
     return;
   /*
    * login_tty() makes the spawned child a session and process-group leader.
@@ -503,7 +487,7 @@ moonbit_pty_shutdown(MoonBitPty *pty) {
    * master read parked forever. The master itself remains open until the
    * MoonBit-side read/write operation returns and releases its RawFdStream.
    */
-  kill(-pty->spawned_pid, SIGKILL);
+  kill(-pid, SIGKILL);
 }
 
 /* ---- close -------------------------------------------------------------- */
@@ -513,19 +497,18 @@ void
 moonbit_pty_close(MoonBitPty *pty) {
   if (!pty)
     return;
-  if (pty->master_fd >= 0) {
+  if (pty->master_fd_is_open) {
     close(pty->master_fd);
-    pty->master_fd = -1;
+    pty->master_fd_is_open = 0;
   }
-  if (pty->control_fd >= 0) {
+  if (pty->control_fd_is_open) {
     close(pty->control_fd);
-    pty->control_fd = -1;
+    pty->control_fd_is_open = 0;
   }
-  if (pty->slave_fd >= 0) {
+  if (pty->slave_fd_is_open) {
     close(pty->slave_fd);
-    pty->slave_fd = -1;
+    pty->slave_fd_is_open = 0;
   }
-  pty->spawned_pid = -1;
 }
 
 #endif

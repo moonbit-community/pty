@@ -101,29 +101,17 @@ moonbit_pty_spawn(
   int32_t rows
 ) {
   int32_t saved_err = 0;
-  if (!pty) {
-    SetLastError(ERROR_INVALID_PARAMETER);
-    return -1;
-  }
+  assert(pty);
   if (moonbit_pty_ensure_conpty() < 0) {
-    /* ConPTY unavailable — no meaningful GetLastError, use a sentinel. */
+    /* ConPTY lookup does not provide a useful GetLastError value. */
     SetLastError(ERROR_NOT_SUPPORTED);
     return -1;
   }
 
-  if (!command_line) {
-    SetLastError(ERROR_INVALID_PARAMETER);
-    return -1;
-  }
-  if (has_cwd && !cwd) {
-    SetLastError(ERROR_INVALID_PARAMETER);
-    return -1;
-  }
+  assert(command_line);
+  assert(!has_cwd || cwd);
   int32_t command_line_len = (int32_t)Moonbit_array_length(command_line);
-  if (command_line_len <= 0) {
-    SetLastError(ERROR_INVALID_PARAMETER);
-    return -1;
-  }
+  assert(command_line_len > 0);
   /*
    * CreateProcessW takes a mutable LPWSTR and may write into it while parsing.
    * Keep MoonBit's GC-managed UTF-16 String untouched by copying its logical
@@ -238,7 +226,6 @@ moonbit_pty_spawn(
   CloseHandle(pipe_out_write);
   pipe_out_write = INVALID_HANDLE_VALUE;
 
-  moonbit_pty_init(pty);
   pty->hpc = hpc;
   pty->pipe_in_read = pipe_in_read;
   pty->pipe_in_write = pipe_in_write;
@@ -271,7 +258,7 @@ moonbit_pty_kill_pid(int32_t pid) {
     return;
   }
   HANDLE process = OpenProcess(PROCESS_TERMINATE, FALSE, (DWORD)pid);
-  if (!process || process == INVALID_HANDLE_VALUE) {
+  if (!process) {
     return;
   }
   TerminateProcess(process, 1);
@@ -283,10 +270,8 @@ moonbit_pty_kill_pid(int32_t pid) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
-  if (!pty || !pty->hpc) {
-    SetLastError(ERROR_INVALID_PARAMETER);
-    return -1;
-  }
+  assert(pty);
+  assert(pty->hpc);
 
   COORD_T size;
   size.X = (short)cols;
@@ -304,11 +289,10 @@ moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
 MOONBIT_FFI_EXPORT
 HANDLE
 moonbit_pty_take_read_fd(MoonBitPty *pty) {
-  if (
-    !pty || !pty->pipe_out_read ||
-    pty->pipe_out_read == INVALID_HANDLE_VALUE
-  )
-    return INVALID_HANDLE_VALUE;
+  assert(pty);
+  assert(
+    pty->pipe_out_read && pty->pipe_out_read != INVALID_HANDLE_VALUE
+  );
   HANDLE fd = pty->pipe_out_read;
   pty->pipe_out_read = INVALID_HANDLE_VALUE;
   return fd;
@@ -317,11 +301,10 @@ moonbit_pty_take_read_fd(MoonBitPty *pty) {
 MOONBIT_FFI_EXPORT
 HANDLE
 moonbit_pty_take_write_fd(MoonBitPty *pty) {
-  if (
-    !pty || !pty->pipe_in_write ||
-    pty->pipe_in_write == INVALID_HANDLE_VALUE
-  )
-    return INVALID_HANDLE_VALUE;
+  assert(pty);
+  assert(
+    pty->pipe_in_write && pty->pipe_in_write != INVALID_HANDLE_VALUE
+  );
   HANDLE fd = pty->pipe_in_write;
   pty->pipe_in_write = INVALID_HANDLE_VALUE;
   return fd;
@@ -330,9 +313,11 @@ moonbit_pty_take_write_fd(MoonBitPty *pty) {
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_child_pid(MoonBitPty *pty) {
-  if (!pty || !pty->proc_handle)
-    return -1;
-  return (int32_t)GetProcessId(pty->proc_handle);
+  assert(pty);
+  assert(pty->proc_handle && pty->proc_handle != INVALID_HANDLE_VALUE);
+  DWORD pid = GetProcessId(pty->proc_handle);
+  assert(pid > 0);
+  return (int32_t)pid;
 }
 
 /* ---- shutdown ----------------------------------------------------------- */
@@ -376,19 +361,19 @@ moonbit_pty_close(MoonBitPty *pty) {
   }
   if (pty->pipe_in_read && pty->pipe_in_read != INVALID_HANDLE_VALUE) {
     CloseHandle(pty->pipe_in_read);
-    pty->pipe_in_read = NULL;
+    pty->pipe_in_read = INVALID_HANDLE_VALUE;
   }
   if (pty->pipe_in_write && pty->pipe_in_write != INVALID_HANDLE_VALUE) {
     CloseHandle(pty->pipe_in_write);
-    pty->pipe_in_write = NULL;
+    pty->pipe_in_write = INVALID_HANDLE_VALUE;
   }
   if (pty->pipe_out_read && pty->pipe_out_read != INVALID_HANDLE_VALUE) {
     CloseHandle(pty->pipe_out_read);
-    pty->pipe_out_read = NULL;
+    pty->pipe_out_read = INVALID_HANDLE_VALUE;
   }
   if (pty->pipe_out_write && pty->pipe_out_write != INVALID_HANDLE_VALUE) {
     CloseHandle(pty->pipe_out_write);
-    pty->pipe_out_write = NULL;
+    pty->pipe_out_write = INVALID_HANDLE_VALUE;
   }
 }
 

@@ -34,11 +34,6 @@ extern "c" fn PtyHandle::bind_slave_to_fd(
 
 ///|
 #cfg(not(platform="windows"))
-#borrow(self)
-extern "c" fn PtyHandle::set_child_pid(self : PtyHandle, pid : Int) -> Unit = "moonbit_pty_set_child_pid"
-
-///|
-#cfg(not(platform="windows"))
 extern "c" fn pty_self_executable() -> Bytes = "moonbit_pty_self_executable"
 
 ///|
@@ -67,14 +62,23 @@ extern "c" fn PtyHandle::take_write_fd(self : PtyHandle) -> @types.Fd = "moonbit
 extern "c" fn pty_kill_pid(pid : Int) -> Unit = "moonbit_pty_kill_pid"
 
 ///|
+#cfg(platform="windows")
 #borrow(self)
 extern "c" fn PtyHandle::child_pid(self : PtyHandle) -> Int = "moonbit_pty_child_pid"
 
 ///|
 /// Stop the terminal source so an in-flight read can finish normally.
 /// Raw read/write handles remain owned by `Pty` until their operations return.
+#cfg(platform="windows")
 #borrow(self)
 extern "c" fn PtyHandle::shutdown(self : PtyHandle) -> Unit = "moonbit_pty_shutdown"
+
+///|
+/// Stop the terminal process group so an in-flight read can observe EOF.
+/// The PID is owned by `PtySpawn`; the native handle does not encode absence.
+#cfg(not(platform="windows"))
+#borrow(self)
+extern "c" fn PtyHandle::shutdown(self : PtyHandle, pid : Int) -> Unit = "moonbit_pty_shutdown"
 
 ///|
 #borrow(self)

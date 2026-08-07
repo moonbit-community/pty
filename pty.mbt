@@ -22,16 +22,17 @@ struct Pty {
 
 ///|
 #cfg(platform="windows")
-priv struct PtySpawn(@async.Task[Int])
+priv struct PtySpawn(@async.Task[Int], Int)
 
 ///|
 #cfg(not(platform="windows"))
-priv struct PtySpawn(@process.Process)
+priv struct PtySpawn(@process.Process, Int)
 
 ///|
 fn raise_last_os_error(context : String) -> Unit raise @os_error.OSError {
   @os_error.check_errno(context)
-  // Fallback for defensive callers that returned -1 without setting errno.
+  // Fallback for defensive callers that returned -1 without setting errno or
+  // GetLastError.
   raise @os_error.OSError(0, context~)
 }
 
@@ -252,9 +253,6 @@ fn[X] spawn_handle(
     "pty.spawn",
   )
   let pid = handle.child_pid()
-  if pid <= 0 {
-    raise_invalid_argument("pty.spawn: child pid")
-  }
   let wait_task = group.spawn(no_wait?, () => {
     @process.wait_pid(pid) catch {
       _ if @async.is_being_cancelled() =>
@@ -265,7 +263,7 @@ fn[X] spawn_handle(
       err => raise err
     }
   })
-  PtySpawn(wait_task)
+  PtySpawn(wait_task, pid)
 }
 
 ///|
@@ -297,7 +295,7 @@ async fn[X] spawn_handle(
 
   let self_cmd = @utf8.decode_lossy(pty_self_executable())
   if self_cmd.is_empty() {
-    raise_invalid_argument("pty.spawn: self executable")
+    raise @os_error.OSError(EIO, context="pty.spawn: self executable")
   }
   let self_args = parse_self_args(pty_self_args_flat())
 
@@ -312,8 +310,6 @@ async fn[X] spawn_handle(
     cwd?,
     no_wait?,
   )
-  handle.set_child_pid(child.pid)
-
   argv_read.close()
   err_write.close()
   slave_read.close()
@@ -332,7 +328,7 @@ async fn[X] spawn_handle(
     }
   }
   keep_handle = true
-  PtySpawn(child)
+  PtySpawn(child, child.pid)
 }
 
 ///|
@@ -480,13 +476,20 @@ pub fn Pty::resize(
   cols~ : Int,
   rows~ : Int,
 ) -> Unit raise @os_error.OSError {
+  if self.closed {
+    raise_invalid_argument("Pty::resize: closed")
+  }
   check_pty_status(self.handle.resize(cols, rows), "Pty::resize")
 }
 
 ///|
-/// Get the spawned child PID when available.
+/// Get the spawned child PID.
+///
+/// The PID is captured when spawning succeeds and remains available after the
+/// PTY resources are closed.
 pub fn Pty::pid(self : Pty) -> Int {
-  self.handle.child_pid()
+  let PtySpawn(_, pid) = self.spawned
+  pid
 }
 
 ///|
@@ -496,7 +499,7 @@ pub fn Pty::pid(self : Pty) -> Int {
 /// in the async process layer rather than in `Pty::close`.
 #cfg(not(platform="windows"))
 pub async fn Pty::wait(self : Pty) -> Int {
-  let PtySpawn(process) = self.spawned
+  let PtySpawn(process, _) = self.spawned
   process.wait()
 }
 
@@ -507,7 +510,7 @@ pub async fn Pty::wait(self : Pty) -> Int {
 /// in the async process layer rather than in `Pty::close`.
 #cfg(platform="windows")
 pub async fn Pty::wait(self : Pty) -> Int {
-  let PtySpawn(task) = self.spawned
+  let PtySpawn(task, _) = self.spawned
   task.wait()
 }
 
@@ -515,7 +518,7 @@ pub async fn Pty::wait(self : Pty) -> Int {
 /// Request cancellation of the child process.
 #cfg(not(platform="windows"))
 pub fn Pty::cancel(self : Pty) -> Unit {
-  let PtySpawn(process) = self.spawned
+  let PtySpawn(process, _) = self.spawned
   process.cancel()
 }
 
@@ -523,10 +526,7 @@ pub fn Pty::cancel(self : Pty) -> Unit {
 /// Request cancellation of the child process.
 #cfg(platform="windows")
 pub fn Pty::cancel(self : Pty) -> Unit {
-  let pid = self.handle.child_pid()
-  if pid > 0 {
-    pty_kill_pid(pid)
-  }
+  pty_kill_pid(self.pid())
 }
 
 ///|
@@ -556,7 +556,7 @@ pub fn Pty::close(self : Pty) -> Unit {
   // from closing the shared master immediately. Avoid signalling a saved PID
   // after an already-reaped child could have been reused by the OS.
   if self.active_reads > 0 || self.active_writes > 0 {
-    self.handle.shutdown()
+    self.handle.shutdown(self.pid())
   }
   self.close_idle_streams()
   self.handle.close()

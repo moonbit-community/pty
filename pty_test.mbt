@@ -41,7 +41,10 @@ async test "spawn succeeds and reports a child pid" {
   @async.with_task_group(group => {
     let pty = @pty.spawn(group, ["/bin/sh"])
     defer pty.close()
-    assert_true(pty.pid() > 0)
+    let pid = pty.pid()
+    assert_true(pid > 0)
+    pty.close()
+    assert_eq(pty.pid(), pid)
   })
 }
 
@@ -236,9 +239,12 @@ async test "cmd outputs through ConPTY" {
   @async.with_task_group(group => {
     let pty = @pty.spawn(group, ["cmd.exe", "/c", "echo", "WIN_READY"])
     defer pty.close()
-    assert_true(pty.pid() > 0)
+    let pid = pty.pid()
+    assert_true(pid > 0)
     assert_true(read_until_contains(pty, "WIN_READY") is Some(_))
     debug_inspect(pty.wait(), content="0")
+    pty.close()
+    assert_eq(pty.pid(), pid)
   })
 }
 
