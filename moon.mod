@@ -1,6 +1,6 @@
 name = "moonbit-community/pty"
 
-version = "0.2.3"
+version = "0.3.1"
 
 import {
   "moonbitlang/async@0.20.2",
