@@ -15,7 +15,7 @@ event loop instead of blocking the thread.
   )
   defer pty.close()
 
-  let reader = pty.reader()               // @raw_fd.RawFdStream, implements @io.Reader
+  let output = pty.read_some()            // Pty implements @io.Reader
   pty.write(@utf8.encode("ls\n"))         // async
   pty.resize(cols=120, rows=40)
   let pid : Int = pty.pid()
@@ -34,8 +34,9 @@ The deprecated method form `Pty::spawn` is kept for compatibility; prefer
 `@pty.spawn` in new code.
 
 `Pty::wait` waits for the child process and returns its exit code. `Pty::close`
-only releases PTY resources; if the child is still running, it first requests
-child cancellation. Call `wait` explicitly when the exit code matters.
+stops the child and releases PTY resources. A read already in progress may
+return buffered shutdown output before finishing with EOF; its task is not
+cancelled. Call `wait` explicitly when the exit code matters.
 
 ## Errors
 

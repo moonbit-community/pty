@@ -12,13 +12,12 @@ async fn read_until_contains(
   timeout_ms? : Int = 3000,
   max_reads? : Int = 8,
 ) -> String? {
-  let reader = pty.reader()
   let buf : FixedArray[Byte] = FixedArray::make(256, b'\x00')
   let mut output = ""
   let mut found = false
   @async.with_timeout(timeout_ms, () => {
     for _ in 0..<max_reads {
-      let n = reader.read(buf)
+      let n = pty.read(buf)
       if n <= 0 {
         break
       }
@@ -74,14 +73,73 @@ async test "idle PTY read waits instead of EOF" {
   @async.with_task_group(group => {
     let pty = @pty.spawn(group, ["/bin/cat"])
     defer pty.close()
-    let reader = pty.reader()
     let buf : FixedArray[Byte] = FixedArray::make(64, b'\x00')
     debug_inspect(
-      @async.with_timeout_opt(100, () => reader.read(buf)),
+      @async.with_timeout_opt(100, () => pty.read(buf)),
       content=(
         #|None
       ),
     )
+  })
+}
+
+///|
+/// The rendezvous makes the spawned task enter `read` before `close` runs.
+/// The task keeps reading because shutdown may produce trailing terminal data;
+/// reaching `0` proves it eventually observed EOF without being cancelled.
+#cfg(not(platform="windows"))
+async test "POSIX close lets a pending read finish with EOF" {
+  @async.with_timeout(3000, () => {
+    @async.with_task_group(group => {
+      let pty = @pty.spawn(group, ["/bin/cat"])
+      defer pty.close()
+      let started = @async.Queue(kind=Blocking(0))
+      let read_task = group.spawn(() => {
+        started.put(())
+        let buf : FixedArray[Byte] = FixedArray::make(64, b'\x00')
+        for ;; {
+          if pty.read(buf) == 0 {
+            break
+          }
+        }
+      })
+      started.get()
+      @async.pause()
+      assert_true(read_task.try_wait() is None)
+      pty.close()
+      read_task.wait()
+    })
+  })
+}
+
+///|
+/// Windows uses a synchronous `ReadFile` in async's worker pool. Closing the
+/// ConPTY output source may first return buffered output; the same reader task
+/// must then reach EOF without being cancelled.
+#cfg(platform="windows")
+async test "Windows close lets a pending read finish with EOF" {
+  @async.with_timeout(3000, () => {
+    @async.with_task_group(group => {
+      let pty = @pty.spawn(group, [
+        "powershell.exe", "-NoProfile", "-Command", "Start-Sleep -Seconds 60",
+      ])
+      defer pty.close()
+      let started = @async.Queue(kind=Blocking(0))
+      let read_task = group.spawn(() => {
+        started.put(())
+        let buf : FixedArray[Byte] = FixedArray::make(64, b'\x00')
+        for ;; {
+          if pty.read(buf) == 0 {
+            break
+          }
+        }
+      })
+      started.get()
+      @async.pause()
+      assert_true(read_task.try_wait() is None)
+      pty.close()
+      read_task.wait()
+    })
   })
 }
 

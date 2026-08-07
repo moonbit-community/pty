@@ -335,6 +335,25 @@ moonbit_pty_child_pid(MoonBitPty *pty) {
   return (int32_t)GetProcessId(pty->proc_handle);
 }
 
+/* ---- shutdown ----------------------------------------------------------- */
+
+MOONBIT_FFI_EXPORT
+void
+moonbit_pty_shutdown(MoonBitPty *pty) {
+  if (!pty)
+    return;
+  /* Keep pipe_out_read alive while ReadFile is pending. Terminating the child
+   * and closing ConPTY stops the producer; ReadFile may return buffered output
+   * once before it reaches EOF. */
+  if (pty->proc_handle && pty->proc_handle != INVALID_HANDLE_VALUE) {
+    TerminateProcess(pty->proc_handle, 0);
+  }
+  if (pty->hpc) {
+    pfnClosePseudoConsole(pty->hpc);
+    pty->hpc = NULL;
+  }
+}
+
 /* ---- close -------------------------------------------------------------- */
 
 MOONBIT_FFI_EXPORT

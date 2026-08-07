@@ -11,6 +11,13 @@ struct Pty {
   read_io : @raw_fd.RawFdStream
   write_io : @raw_fd.RawFdStream
   spawned : PtySpawn
+  // `RawFdStream::close` cannot safely interrupt a synchronous Windows
+  // `ReadFile` running in async's worker pool. Keep the stream alive while an
+  // operation is pending; closing the ConPTY/PTY source makes that operation
+  // finish naturally, after which the stream handle can be released here.
+  mut active_reads : Int
+  mut active_writes : Int
+  mut closed : Bool
 }
 
 ///|
@@ -137,7 +144,15 @@ pub async fn[X] Pty::spawn(
     }
   }
   let write_io = register_write_io(handle, read_io)
-  { handle, read_io, write_io, spawned }
+  {
+    handle,
+    read_io,
+    write_io,
+    spawned,
+    active_reads: 0,
+    active_writes: 0,
+    closed: false,
+  }
 }
 
 ///|
@@ -365,13 +380,75 @@ async fn register_write_io(
 }
 
 ///|
-/// Get the async reader for this PTY, exposing the `@io.Reader` interface
-/// (`read`, `read_some`, `read_until`, ...).
-///
-/// The returned `RawFdStream` is owned by the `Pty`; do not call `close()`
-/// on it. Use `Pty::close` to release the registration.
-pub fn Pty::reader(self : Pty) -> @raw_fd.RawFdStream {
-  self.read_io
+/// Release streams whose in-flight operations have finished after the PTY was
+/// closed. POSIX uses one fd for both directions, so neither side can release
+/// it while the other side is still using it.
+#cfg(not(platform="windows"))
+fn Pty::close_idle_streams(self : Pty) -> Unit {
+  if self.closed && self.active_reads == 0 && self.active_writes == 0 {
+    self.read_io.close()
+  }
+}
+
+///|
+/// Release Windows' separate ConPTY input/output handles independently once
+/// their corresponding operation has finished.
+#cfg(platform="windows")
+fn Pty::close_idle_streams(self : Pty) -> Unit {
+  if self.closed && self.active_reads == 0 {
+    self.read_io.close()
+  }
+  if self.closed && self.active_writes == 0 {
+    self.write_io.close()
+  }
+}
+
+///|
+/// Read once from the POSIX PTY master. Linux reports `EIO` instead of a
+/// zero-length read when the slave closes; after `Pty::close` that condition is
+/// the PTY's EOF, not a reader-task failure.
+#cfg(not(platform="windows"))
+async fn Pty::read_from_stream(
+  self : Pty,
+  buf : FixedArray[Byte],
+  offset~ : Int,
+  max_len~ : Int,
+) -> Int {
+  self.read_io.read(buf, offset~, max_len~) catch {
+    @os_error.OSError(code, ..) if self.closed && code == EIO => 0
+    err => raise err
+  }
+}
+
+///|
+#cfg(platform="windows")
+async fn Pty::read_from_stream(
+  self : Pty,
+  buf : FixedArray[Byte],
+  offset~ : Int,
+  max_len~ : Int,
+) -> Int {
+  self.read_io.read(buf, offset~, max_len~)
+}
+
+///|
+/// `Pty` owns its reader implementation so `close()` can coordinate the raw
+/// stream lifetime without cancelling the task currently reading from it.
+pub impl @io.Reader for Pty with fn _get_internal_buffer(self) {
+  self.read_io._get_internal_buffer()
+}
+
+///|
+pub impl @io.Reader for Pty with fn _direct_read(self, buf, offset~, max_len~) {
+  if self.closed {
+    return 0
+  }
+  self.active_reads += 1
+  defer {
+    self.active_reads -= 1
+    self.close_idle_streams()
+  }
+  self.read_from_stream(buf, offset~, max_len~)
 }
 
 ///|
@@ -383,6 +460,14 @@ pub fn Pty::reader(self : Pty) -> @raw_fd.RawFdStream {
 ///
 /// Raises `@os_error.OSError` if the underlying write fails.
 pub async fn Pty::write(self : Pty, data : Bytes) -> Unit {
+  if self.closed {
+    raise_invalid_argument("Pty::write: closed")
+  }
+  self.active_writes += 1
+  defer {
+    self.active_writes -= 1
+    self.close_idle_streams()
+  }
   self.write_io.write(data)
 }
 
@@ -447,8 +532,9 @@ pub fn Pty::cancel(self : Pty) -> Unit {
 ///|
 /// Close the PTY, releasing all resources.
 ///
-/// Closes the owned `RawFdStream` wrapper(s) and then tears down the underlying
-/// OS PTY handle.
+/// Stops the child so a pending read observes EOF before its `RawFdStream`
+/// handle is released. An idle stream is released immediately; an in-flight
+/// operation releases it after returning.
 ///
 /// Resource lifetime is explicit: call this when the PTY is no longer needed.
 /// The native handle is plain GC-managed memory with no finalizer, so OS
@@ -458,16 +544,31 @@ pub fn Pty::cancel(self : Pty) -> Unit {
 /// idempotent.
 #cfg(not(platform="windows"))
 pub fn Pty::close(self : Pty) -> Unit {
+  if self.closed {
+    return
+  }
+  self.closed = true
+  // Cancel the child-process task, not the external task reading from `Pty`.
+  // The native shutdown below supplies the synchronous wakeup that process
+  // cancellation alone does not guarantee.
   self.cancel()
-  self.read_io.close()
+  // Only force the slave-side producer to stop when an operation prevents us
+  // from closing the shared master immediately. Avoid signalling a saved PID
+  // after an already-reaped child could have been reused by the OS.
+  if self.active_reads > 0 || self.active_writes > 0 {
+    self.handle.shutdown()
+  }
+  self.close_idle_streams()
   self.handle.close()
+  self.close_idle_streams()
 }
 
 ///|
 /// Close the PTY, releasing all resources.
 ///
-/// Closes the owned `RawFdStream` wrapper(s) and then tears down the underlying
-/// OS PTY handle.
+/// Stops the child so a pending read observes EOF before its `RawFdStream`
+/// handle is released. Idle streams are released immediately; in-flight
+/// operations release them after returning.
 ///
 /// Resource lifetime is explicit: call this when the PTY is no longer needed.
 /// The native handle is plain GC-managed memory with no finalizer, so OS
@@ -477,8 +578,19 @@ pub fn Pty::close(self : Pty) -> Unit {
 /// idempotent.
 #cfg(platform="windows")
 pub fn Pty::close(self : Pty) -> Unit {
+  if self.closed {
+    return
+  }
+  self.closed = true
+  // `cancel` terminates the child process; it does not cancel the external
+  // task whose synchronous ReadFile/WriteFile is still running.
   self.cancel()
-  self.read_io.close()
-  self.write_io.close()
+  // Stop the ConPTY producer only when closing a pipe would race with a
+  // synchronous ReadFile/WriteFile still running in async's worker pool.
+  if self.active_reads > 0 || self.active_writes > 0 {
+    self.handle.shutdown()
+  }
+  self.close_idle_streams()
   self.handle.close()
+  self.close_idle_streams()
 }
