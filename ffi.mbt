@@ -46,12 +46,17 @@ extern "c" fn pty_self_executable() -> Bytes = "moonbit_pty_self_executable"
 extern "c" fn pty_self_args_flat() -> Bytes = "moonbit_pty_self_args_flat"
 
 ///|
+#cfg(platform="windows")
 #borrow(self)
 extern "c" fn PtyHandle::resize(
   self : PtyHandle,
   cols : Int,
   rows : Int,
 ) -> Int = "moonbit_pty_resize"
+
+///|
+#cfg(not(platform="windows"))
+extern "c" fn pty_resize(master_fd : @types.Fd, cols : Int, rows : Int) -> Int = "moonbit_pty_resize"
 
 ///|
 #borrow(self)

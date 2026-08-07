@@ -61,7 +61,7 @@ try {
 | Platform | Method | Why |
 |----------|--------|-----|
 | macOS | `openpty()` + `moonbitlang/async` self-spawn helper | avoids `fork()` with mimalloc |
-| Linux | `openpty()` + `moonbitlang/async` self-spawn helper | shares the async process spawn path |
+| Linux | `posix_openpt(O_CLOEXEC)` + `moonbitlang/async` self-spawn helper | prevents concurrent spawns from inheriting another PTY |
 | Windows | ConPTY + `CreateProcessW()` | No fork involved |
 
 ## Windows: ConPTY process startup
@@ -143,10 +143,12 @@ constructor that runs in helper mode before `main()`.
 
 Plumbing between parent and helper uses one env var plus stdio redirection:
 
-1. `openpty()` creates a PTY pair (master + slave fd).
+1. macOS uses `openpty()` for the PTY pair. Linux opens the master and slave
+   with `O_CLOEXEC`, so neither descriptor is visible to a concurrent spawn.
 2. The parent creates two pipes — `argv_pipe` (parent → helper) and `err_pipe`
    (helper → parent) — and a dummy pipe write end whose fd is rebound to the
-   PTY slave with `dup2(slave, dummy_write.fd())`.
+   PTY slave. Linux uses `dup3(..., O_CLOEXEC)` so that replacement is atomic;
+   other Unix platforms use `dup2` followed by `fcntl(FD_CLOEXEC)`.
 3. `spawn` launches the current command inside the caller's task group with:
    - `stdin=argv_pipe.read`
    - `stdout=dummy_write` (now the PTY slave fd)

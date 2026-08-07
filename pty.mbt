@@ -475,11 +475,33 @@ pub async fn Pty::write(self : Pty, data : Bytes) -> Unit {
 /// Resize the PTY window.
 ///
 /// Raises `@os_error.OSError` if the underlying syscall fails.
+#cfg(not(platform="windows"))
 pub fn Pty::resize(
   self : Pty,
   cols~ : Int,
   rows~ : Int,
 ) -> Unit raise @os_error.OSError {
+  if self.closed {
+    raise_invalid_argument("Pty::resize: closed")
+  }
+  // The Unix PTY master is already owned by read_io. Using that descriptor
+  // avoids retaining a duplicate solely for TIOCSWINSZ.
+  check_pty_status(pty_resize(self.read_io.fd, cols, rows), "Pty::resize")
+}
+
+///|
+/// Resize the PTY window.
+///
+/// Raises `@os_error.OSError` if the underlying syscall fails.
+#cfg(platform="windows")
+pub fn Pty::resize(
+  self : Pty,
+  cols~ : Int,
+  rows~ : Int,
+) -> Unit raise @os_error.OSError {
+  if self.closed {
+    raise_invalid_argument("Pty::resize: closed")
+  }
   check_pty_status(self.handle.resize(cols, rows), "Pty::resize")
 }
 

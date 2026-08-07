@@ -1,3 +1,7 @@
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 /*
  * pty.c — Cross-platform PTY implementation for MoonBit FFI.
  *
@@ -19,7 +23,6 @@ moonbit_pty_init(MoonBitPty *pty) {
   memset(pty, 0, sizeof(*pty));
 #ifndef _WIN32
   pty->master_fd = -1;
-  pty->control_fd = -1;
   pty->slave_fd = -1;
   pty->spawned_pid = -1;
 #endif
