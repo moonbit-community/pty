@@ -1,553 +1,328 @@
-#if defined(__linux__) && !defined(_GNU_SOURCE)
-#define _GNU_SOURCE
-#endif
-
-/*
- * Unix PTY implementation for pty.c.
- *
- * This file is included by pty.c and intentionally shares its static helpers
- * and the MoonBitPty definition.
- */
-
-#include "pty_internal.h"
-
-#ifndef _WIN32
-
+#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <limits.h>
-#include <poll.h>
 #include <signal.h>
+#include <spawn.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/ttycom.h>
+#include <termios.h>
 #include <unistd.h>
 
-/* openpty() / login_tty() live in different headers depending on platform. */
+#include "moonbit.h"
+
+struct moonbit_pty {
+  int32_t primary;
+  int32_t replica;
+};
+
+/**
+ * Configure the replica the way a program expects a real terminal to behave:
+ * canonical input, echo, and the usual control characters. Programs that want
+ * raw mode (vim, fzf, ...) call `tcsetattr` themselves. Raw mode belongs on the
+ * caller's own controlling terminal, not here.
+ *
+ * These are the pty driver defaults; setting them explicitly keeps the behavior
+ * identical across platforms instead of inheriting whatever the driver picks.
+ */
+static inline void
+moonbit_pty_set_termios(struct termios *t) {
+  memset(t, 0, sizeof *t);
+  t->c_iflag = ICRNL | IXON | IXANY | IMAXBEL | BRKINT;
+#if defined(IUTF8)
+  t->c_iflag |= IUTF8;
+#endif
+  t->c_oflag = OPOST | ONLCR;
+  t->c_cflag = CS8 | CREAD | HUPCL;
+  t->c_lflag = ICANON | ISIG | IEXTEN | ECHO | ECHOE | ECHOK | ECHOKE | ECHOCTL;
+
+  for (size_t i = 0; i < NCCS; i++)
+    t->c_cc[i] = _POSIX_VDISABLE;
+  t->c_cc[VINTR] = 0x03;    /* ^C */
+  t->c_cc[VQUIT] = 0x1c;    /* ^\ */
+  t->c_cc[VERASE] = 0x7f;   /* DEL */
+  t->c_cc[VKILL] = 0x15;    /* ^U */
+  t->c_cc[VEOF] = 0x04;     /* ^D */
+  t->c_cc[VSTART] = 0x11;   /* ^Q */
+  t->c_cc[VSTOP] = 0x13;    /* ^S */
+  t->c_cc[VSUSP] = 0x1a;    /* ^Z */
+  t->c_cc[VREPRINT] = 0x12; /* ^R */
+  t->c_cc[VWERASE] = 0x17;  /* ^W */
+  t->c_cc[VLNEXT] = 0x16;   /* ^V */
+  t->c_cc[VDISCARD] = 0x0f; /* ^O */
+#if defined(VDSUSP)
+  t->c_cc[VDSUSP] = 0x19; /* ^Y */
+#endif
+#if defined(VSTATUS)
+  t->c_cc[VSTATUS] = 0x14; /* ^T */
+#endif
+  /* Ignored while ICANON is set, but a program that turns it off should find
+   * the usual "block until at least one byte" behavior. */
+  t->c_cc[VMIN] = 1;
+  t->c_cc[VTIME] = 0;
+
+  cfsetispeed(t, B38400);
+  cfsetospeed(t, B38400);
+}
+
 #if defined(__APPLE__)
-#include <crt_externs.h>
-#include <mach-o/dyld.h>
-#include <util.h>
-#elif defined(__FreeBSD__) || defined(__DragonFly__)
-#include <libutil.h>
+
+/** We use `__fork` to skip pthread_atfork handlers. */
+extern pid_t
+__fork(void) __attribute__((weak_import));
+
+static inline pid_t
+moonbit_pty__fork(void) {
+  if (&__fork == NULL) {
+    errno = ENOSYS;
+    return -1;
+  }
+  return __fork();
+}
+
 #else
-#include <pty.h>
-#include <utmp.h>
+
+static inline pid_t
+moonbit_pty__fork(void) {
+  return fork();
+}
+
 #endif
 
-#if defined(__APPLE__) || defined(__linux__)
-#define MOONBIT_PTY_USE_ASYNC_SPAWN 1
-#define MOONBIT_PTY_EXEC_ENV "MOONBIT_PTY_EXEC"
-#else
-#define MOONBIT_PTY_USE_ASYNC_SPAWN 0
-#endif
-
-static void
-moonbit_pty_set_nonblocking(int fd) {
-  int flags = fcntl(fd, F_GETFL, 0);
-  if (flags >= 0) {
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+static inline int32_t
+moonbit_pty__fd_dup_cloexec_3(int32_t fd) {
+  assert(fd >= 0);
+  if (fd >= 3) {
+    return fd;
   }
-}
-
-static moonbit_bytes_t
-moonbit_pty_empty_bytes(void) {
-  return moonbit_make_bytes(0, 0);
-}
-
-static moonbit_bytes_t
-moonbit_pty_copy_bytes(const void *data, size_t len) {
-  if (!data || len > INT32_MAX) {
-    return moonbit_pty_empty_bytes();
-  }
-  moonbit_bytes_t out = moonbit_make_bytes((int32_t)len, 0);
-  if (len > 0) {
-    memcpy(out, data, len);
-  }
-  return out;
-}
-
-MOONBIT_FFI_EXPORT
-moonbit_bytes_t
-moonbit_pty_self_executable(void) {
-#if defined(__APPLE__)
-  char buf[PATH_MAX];
-  uint32_t size = sizeof(buf);
-  if (_NSGetExecutablePath(buf, &size) == 0) {
-    return moonbit_pty_copy_bytes(buf, strlen(buf));
-  }
-  /* dyld paths may exceed PATH_MAX; `size` now holds the required length. */
-  char *path = (char *)malloc((size_t)size);
-  if (!path) {
-    return moonbit_pty_empty_bytes();
-  }
-  if (_NSGetExecutablePath(path, &size) != 0) {
-    free(path);
-    return moonbit_pty_empty_bytes();
-  }
-  moonbit_bytes_t out = moonbit_pty_copy_bytes(path, strlen(path));
-  free(path);
-  return out;
-#elif defined(__linux__)
-  char buf[PATH_MAX];
-  ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf));
-  if (n < 0) {
-    return moonbit_pty_empty_bytes();
-  }
-  if ((size_t)n < sizeof(buf)) {
-    return moonbit_pty_copy_bytes(buf, (size_t)n);
-  }
-  /* readlink truncates silently: a full buffer may mean a longer target,
-   * so retry on the heap with doubling capacity. */
-  for (size_t cap = sizeof(buf) * 2;; cap *= 2) {
-    char *path = (char *)malloc(cap);
-    if (!path) {
-      return moonbit_pty_empty_bytes();
-    }
-    n = readlink("/proc/self/exe", path, cap);
-    if (n < 0) {
-      free(path);
-      return moonbit_pty_empty_bytes();
-    }
-    if ((size_t)n < cap) {
-      moonbit_bytes_t out = moonbit_pty_copy_bytes(path, (size_t)n);
-      free(path);
-      return out;
-    }
-    free(path);
-  }
-#else
-  return moonbit_pty_empty_bytes();
-#endif
-}
-
-/* Blocking write of `errno` back to the parent as a 4-byte little-endian
- * integer (decoded by `decode_child_error` in pty.mbt). Retries on EINTR
- * and short writes. The return value is intentionally ignored by callers:
- * we're on a fatal path and if the error pipe is broken the parent will
- * see EOF and fall back to its generic failure path. */
-static void
-moonbit_pty_report_error(int err_fd, int err) {
-  uint32_t val = (uint32_t)err;
-  uint8_t buf[4] = {
-      (uint8_t)(val & 0xff),
-      (uint8_t)((val >> 8) & 0xff),
-      (uint8_t)((val >> 16) & 0xff),
-      (uint8_t)((val >> 24) & 0xff),
-  };
-  const char *p = (const char *)buf;
-  size_t remaining = sizeof(buf);
-  while (remaining > 0) {
-    ssize_t n = write(err_fd, p, remaining);
-    if (n < 0) {
-      if (errno == EINTR)
-        continue;
-      return;
-    }
-    p += n;
-    remaining -= (size_t)n;
-  }
-}
-
-#if MOONBIT_PTY_USE_ASYNC_SPAWN
-/* Constructor-side unsetenv so the target program doesn't inherit our
- * helper-mode marker after execvp. */
-static void
-moonbit_pty_unset_helper_env(void) {
-  unsetenv(MOONBIT_PTY_EXEC_ENV);
-}
-
-/* Read the flattened argv buffer from argv_fd until EOF. Wire format is
- * the same null-separated buffer the MoonBit side builds:
- *   "arg0\0arg1\0...arg(n-1)\0"
- * Returns 0 on success with *out_buf / *out_len populated, or an errno
- * on failure. Caller owns *out_buf on success. */
-static int
-moonbit_pty_read_argv_buf(int argv_fd, char **out_buf, size_t *out_len) {
-  size_t cap = 256;
-  size_t len = 0;
-  char *buf = (char *)malloc(cap);
-  if (!buf)
-    return ENOMEM;
-  for (;;) {
-    if (len == cap) {
-      size_t new_cap = cap * 2;
-      char *new_buf = (char *)realloc(buf, new_cap);
-      if (!new_buf) {
-        free(buf);
-        return ENOMEM;
-      }
-      buf = new_buf;
-      cap = new_cap;
-    }
-    ssize_t n = read(argv_fd, buf + len, cap - len);
-    if (n == 0)
-      break;
-    if (n < 0) {
-      if (errno == EINTR)
-        continue;
-      /* moonbitlang/async pipes carry O_NONBLOCK on the shared open file
-       * description, so the inherited fd may be non-blocking. Wait until
-       * readable instead of treating EAGAIN as a fatal error. */
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        struct pollfd pfd = {.fd = argv_fd, .events = POLLIN};
-        if (poll(&pfd, 1, -1) < 0 && errno != EINTR) {
-          int saved = errno;
-          free(buf);
-          return saved;
-        }
-        continue;
-      }
-      int saved = errno;
-      free(buf);
-      return saved;
-    }
-    len += (size_t)n;
-  }
-  *out_buf = buf;
-  *out_len = len;
-  return 0;
-}
-
-MOONBIT_FFI_EXPORT
-moonbit_bytes_t
-moonbit_pty_self_args_flat(void) {
-#if defined(__APPLE__)
-  int argc = *_NSGetArgc();
-  char **argv = *_NSGetArgv();
-  if (argc <= 0 || !argv) {
-    return moonbit_pty_empty_bytes();
-  }
-  size_t total = 0;
-  for (int i = 0; i < argc; i++) {
-    if (!argv[i]) {
-      return moonbit_pty_empty_bytes();
-    }
-    total += strlen(argv[i]) + 1;
-  }
-  if (total > INT32_MAX) {
-    return moonbit_pty_empty_bytes();
-  }
-  moonbit_bytes_t out = moonbit_make_bytes((int32_t)total, 0);
-  size_t pos = 0;
-  for (int i = 0; i < argc; i++) {
-    size_t len = strlen(argv[i]);
-    memcpy(out + pos, argv[i], len);
-    pos += len + 1;
-  }
-  return out;
-#elif defined(__linux__)
-  int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
-  if (fd < 0) {
-    return moonbit_pty_empty_bytes();
-  }
-  char *buf = NULL;
-  size_t len = 0;
-  int err = moonbit_pty_read_argv_buf(fd, &buf, &len);
+  int nfd = fcntl(fd, F_DUPFD_CLOEXEC, 3);
+  int er = errno;
   close(fd);
-  if (err != 0 || !buf) {
-    return moonbit_pty_empty_bytes();
-  }
-  if (len == 0 || buf[len - 1] != '\0') {
-    char *new_buf = (char *)realloc(buf, len + 1);
-    if (!new_buf) {
-      free(buf);
-      return moonbit_pty_empty_bytes();
-    }
-    buf = new_buf;
-    buf[len++] = '\0';
-  }
-  moonbit_bytes_t out = moonbit_pty_copy_bytes(buf, len);
-  free(buf);
-  return out;
-#else
-  return moonbit_pty_empty_bytes();
-#endif
+  errno = er;
+  return nfd;
 }
-
-/* Split the flat argv buffer in-place into a NULL-terminated argv array.
- * The buffer is already a sequence of null-terminated strings, so the
- * argv entries point directly into it. The buffer must stay alive until
- * execvp runs. */
-static char **
-moonbit_pty_argv_from_buf(char *buf, size_t len) {
-  if (len == 0 || buf[len - 1] != '\0')
-    return NULL;
-  int argc = 0;
-  for (size_t i = 0; i < len; i++) {
-    if (buf[i] == '\0')
-      argc++;
-  }
-  if (argc == 0)
-    return NULL;
-  char **argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
-  if (!argv)
-    return NULL;
-  int idx = 0;
-  char *p = buf;
-  for (size_t i = 0; i < len; i++) {
-    if (buf[i] == '\0') {
-      argv[idx++] = p;
-      p = buf + i + 1;
-    }
-  }
-  argv[argc] = NULL;
-  return argv;
-}
-
-/* Helper-mode body: read argv from argv_fd, attach the slave tty, execvp
- * the target. Any pre-exec failure writes the errno to err_fd so the
- * parent can surface it; a successful execvp auto-closes err_fd via
- * FD_CLOEXEC, signalling EOF = success to the parent. */
-static int
-moonbit_pty_exec_from_pipe(int argv_fd, int err_fd, int slave_fd) {
-  sigset_t all_signals;
-  sigfillset(&all_signals);
-  sigprocmask(SIG_UNBLOCK, &all_signals, NULL);
-  signal(SIGPIPE, SIG_DFL);
-
-  char *buf = NULL;
-  size_t buf_len = 0;
-  int err = moonbit_pty_read_argv_buf(argv_fd, &buf, &buf_len);
-  close(argv_fd);
-  if (err != 0) {
-    moonbit_pty_report_error(err_fd, err);
-    return 127;
-  }
-
-  char **child_argv = moonbit_pty_argv_from_buf(buf, buf_len);
-  if (!child_argv) {
-    moonbit_pty_report_error(err_fd, EINVAL);
-    free(buf);
-    return 127;
-  }
-
-  moonbit_pty_unset_helper_env();
-
-  if (login_tty(slave_fd) < 0) {
-    moonbit_pty_report_error(err_fd, errno);
-    return 126;
-  }
-
-  /* Ensure a successful execvp closes err_fd — the parent uses that EOF
-   * as its "exec succeeded" signal. If execvp fails, the fd stays open
-   * and we can still report the errno below. */
-  fcntl(err_fd, F_SETFD, FD_CLOEXEC);
-
-  execvp(child_argv[0], child_argv);
-  /* execvp only returns on failure. */
-  moonbit_pty_report_error(err_fd, errno);
-  return 127;
-}
-
-__attribute__((constructor)) static void
-moonbit_pty_constructor(void) {
-  const char *helper_mode = getenv(MOONBIT_PTY_EXEC_ENV);
-  if (!helper_mode || strcmp(helper_mode, "stdio") != 0) {
-    return;
-  }
-
-  int err_fd = dup(STDERR_FILENO);
-  if (err_fd < 0) {
-    moonbit_pty_report_error(STDERR_FILENO, errno);
-    _exit(127);
-  }
-  _exit(moonbit_pty_exec_from_pipe(STDIN_FILENO, err_fd, STDOUT_FILENO));
-}
-#endif
 
 MOONBIT_FFI_EXPORT
 int32_t
-moonbit_pty_open(MoonBitPty *pty, int32_t cols, int32_t rows) {
-  if (!pty) {
-    errno = EINVAL;
+moonbit_pty_open(struct moonbit_pty *pty, int32_t rows, int32_t cols) {
+  int er;
+
+  int p = open("/dev/ptmx", O_RDWR | O_NOCTTY | O_CLOEXEC | O_NONBLOCK);
+  if (p < 0) {
     return -1;
+  }
+  p = moonbit_pty__fd_dup_cloexec_3(p);
+  if (p < 0) {
+    er = errno;
+    goto fail_primary;
   }
 
-  struct winsize ws;
-  memset(&ws, 0, sizeof(ws));
-  ws.ws_col = (unsigned short)cols;
-  ws.ws_row = (unsigned short)rows;
+  if (grantpt(p) != 0 || unlockpt(p) != 0) {
+    er = errno;
+    goto fail_primary;
+  }
 
-  int master_fd = -1;
-  int slave_fd = -1;
-#if defined(__linux__)
-  /* `openpty` returns descriptors before callers can mark them CLOEXEC. A
-   * concurrent `posix_spawn` worker can inherit the slave in that window and
-   * keep an unrelated PTY reader from ever observing EOF. Open both ends with
-   * O_CLOEXEC so each descriptor is protected at creation time. */
-  master_fd = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
-  if (master_fd < 0) {
-    return -1;
+  char nm[128];
+  if (ptsname_r(p, nm, sizeof(nm)) != 0) {
+    er = errno;
+    goto fail_primary;
   }
-  if (grantpt(master_fd) < 0 || unlockpt(master_fd) < 0) {
-    int saved_errno = errno;
-    close(master_fd);
-    errno = saved_errno;
-    return -1;
-  }
-  char slave_name[PATH_MAX];
-  int ptsname_error = ptsname_r(master_fd, slave_name, sizeof(slave_name));
-  if (ptsname_error != 0) {
-    close(master_fd);
-    errno = ptsname_error;
-    return -1;
-  }
-  slave_fd = open(slave_name, O_RDWR | O_NOCTTY | O_CLOEXEC);
-  if (slave_fd < 0) {
-    int saved_errno = errno;
-    close(master_fd);
-    errno = saved_errno;
-    return -1;
-  }
-  if (ioctl(slave_fd, TIOCSWINSZ, &ws) < 0) {
-    int saved_errno = errno;
-    close(master_fd);
-    close(slave_fd);
-    errno = saved_errno;
-    return -1;
-  }
-#else
-  if (openpty(&master_fd, &slave_fd, NULL, NULL, &ws) < 0) {
-    return -1;
-  }
-  int master_fd_flags = fcntl(master_fd, F_GETFD, 0);
-  int slave_fd_flags = fcntl(slave_fd, F_GETFD, 0);
-  if (
-    master_fd_flags < 0 || slave_fd_flags < 0 ||
-    fcntl(master_fd, F_SETFD, master_fd_flags | FD_CLOEXEC) < 0 ||
-    fcntl(slave_fd, F_SETFD, slave_fd_flags | FD_CLOEXEC) < 0
-  ) {
-    int saved_errno = errno;
-    close(master_fd);
-    close(slave_fd);
-    errno = saved_errno;
-    return -1;
-  }
-#endif
-  moonbit_pty_set_nonblocking(master_fd);
 
-  moonbit_pty_init(pty);
-  pty->master_fd = master_fd;
-  pty->slave_fd = slave_fd;
+  int r = open(nm, O_RDWR | O_NOCTTY | O_CLOEXEC);
+  if (r < 0) {
+    er = errno;
+    goto fail_primary;
+  }
+  r = moonbit_pty__fd_dup_cloexec_3(r);
+  if (r < 0) {
+    er = errno;
+    goto fail_primary;
+  }
+
+  struct termios t;
+  moonbit_pty_set_termios(&t);
+  if (tcsetattr(r, TCSAFLUSH, &t) != 0) {
+    er = errno;
+    goto fail_replica;
+  }
+
+  struct winsize ws = {
+    .ws_row = rows,
+    .ws_col = cols,
+    .ws_xpixel = 0,
+    .ws_ypixel = 0,
+  };
+  if (ioctl(r, TIOCSWINSZ, &ws) != 0) {
+    er = errno;
+    goto fail_replica;
+  }
+  pty->primary = p;
+  pty->replica = r;
   return 0;
-}
 
-MOONBIT_FFI_EXPORT
-int32_t
-moonbit_pty_bind_slave_to_fd(MoonBitPty *pty, int32_t target_fd) {
-  if (!pty || pty->slave_fd < 0 || target_fd < 0) {
-    errno = EINVAL;
-    return -1;
-  }
-  int slave_fd = pty->slave_fd;
-#if defined(__linux__)
-  /* dup2 clears CLOEXEC and would expose target_fd until the following fcntl.
-   * dup3 installs the exact descriptor and CLOEXEC in one syscall. */
-  if (slave_fd != target_fd && dup3(slave_fd, target_fd, O_CLOEXEC) < 0) {
-    return -1;
-  }
-#else
-  if (dup2(slave_fd, target_fd) < 0) {
-    return -1;
-  }
-  /* @process.spawn duplicates this fd onto the child's stdout before exec,
-   * which clears CLOEXEC on that intentional destination. Keeping CLOEXEC on
-   * the parent-side source prevents unrelated concurrent spawns inheriting it. */
-  int target_fd_flags = fcntl(target_fd, F_GETFD, 0);
-  if (
-    target_fd_flags < 0 ||
-    fcntl(target_fd, F_SETFD, target_fd_flags | FD_CLOEXEC) < 0
-  ) {
-    return -1;
-  }
-#endif
-  if (slave_fd != target_fd) {
-    close(slave_fd);
-  }
-  pty->slave_fd = -1;
-  return 0;
-}
-
-MOONBIT_FFI_EXPORT
-void
-moonbit_pty_set_child_pid(MoonBitPty *pty, int32_t pid) {
-  if (!pty) {
-    return;
-  }
-  pty->spawned_pid = (int)pid;
-}
-
-/* ---- resize ------------------------------------------------------------- */
-
-MOONBIT_FFI_EXPORT
-int32_t
-moonbit_pty_resize(int32_t master_fd, int32_t cols, int32_t rows) {
-  if (master_fd < 0) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  struct winsize ws;
-  memset(&ws, 0, sizeof(ws));
-  ws.ws_col = (unsigned short)cols;
-  ws.ws_row = (unsigned short)rows;
-
-  if (ioctl(master_fd, TIOCSWINSZ, &ws) == 0)
-    return 0;
+fail_replica:
+  close(r);
+fail_primary:
+  close(p);
+  errno = er;
   return -1;
 }
 
-/* ---- read_fd ------------------------------------------------------------ */
+#define MOONBIT_PTY__NORETURN __attribute__((noreturn))
+
+static inline void MOONBIT_PTY__NORETURN
+moonbit_pty__fork_fail(int32_t efd) {
+  int32_t er = errno;
+  write(efd, &er, sizeof(er));
+  _exit(127);
+}
+
+static inline char **
+moonbit_pty__dup_strings(moonbit_bytes_t *bytes_array) {
+  int n = Moonbit_array_length(bytes_array);
+  char **dest = malloc((n + 1) * sizeof(char *));
+  if (!dest) {
+    return NULL;
+  }
+  for (int i = 0; i < n; i++) {
+    int len = Moonbit_array_length(bytes_array[i]) + 1;
+    dest[i] = malloc(len);
+    if (!dest[i]) {
+      for (int j = 0; j < i; j++) {
+        free(dest[j]);
+      }
+      free(dest);
+      return NULL;
+    }
+    memcpy(dest[i], bytes_array[i], len);
+  }
+  dest[n] = NULL;
+  return dest;
+}
+
+static inline void
+moonbit_pty__free_strings(char **strings) {
+  for (int i = 0; strings[i] != NULL; i++) {
+    free(strings[i]);
+  }
+  free(strings);
+}
 
 MOONBIT_FFI_EXPORT
 int32_t
-moonbit_pty_take_read_fd(MoonBitPty *pty) {
-  if (!pty || pty->master_fd < 0)
+moonbit_pty_spawn(
+  struct moonbit_pty *pty,
+  int32_t efd,
+  moonbit_bytes_t path,
+  moonbit_bytes_t *argv,
+  moonbit_bytes_t *envp
+) {
+  int replica = pty->replica;
+
+  int path_size = Moonbit_array_length(path) + 1;
+  char *fork_path = malloc(path_size);
+  if (!fork_path) {
+    errno = ENOMEM;
     return -1;
-  int fd = pty->master_fd;
-  pty->master_fd = -1;
-  return (int32_t)fd;
+  }
+  memcpy(fork_path, path, path_size);
+
+  char **fork_argv = moonbit_pty__dup_strings(argv);
+  if (!fork_argv) {
+    goto argv_fail;
+  }
+  char **fork_envp = moonbit_pty__dup_strings(envp);
+  if (!fork_envp) {
+    goto envp_fail;
+  }
+
+  pid_t pid = moonbit_pty__fork();
+  if (pid == 0) {
+    struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
+    sigprocmask(SIG_SETMASK, &sa.sa_mask, NULL);
+    sa.sa_handler = SIG_DFL;
+    sa.sa_flags = 0;
+    for (int i = 1; i < NSIG; i++) {
+      sigaction(i, &sa, NULL);
+    }
+
+    if (efd < 3) {
+      int nefd = fcntl(efd, F_DUPFD_CLOEXEC, 3);
+      if (nefd < 0) {
+        _exit(127);
+      }
+      efd = nefd;
+    }
+
+    if (replica < 3) {
+      int n = fcntl(replica, F_DUPFD, 3);
+      if (n < 0) {
+        moonbit_pty__fork_fail(efd);
+      }
+      replica = n;
+    }
+
+    if (setsid() < 0) {
+      moonbit_pty__fork_fail(efd);
+    }
+    if (ioctl(replica, TIOCSCTTY, 0) < 0) {
+      moonbit_pty__fork_fail(efd);
+    }
+    if (dup2(replica, STDIN_FILENO) < 0 || dup2(replica, STDOUT_FILENO) < 0 ||
+        dup2(replica, STDERR_FILENO) < 0) {
+      moonbit_pty__fork_fail(efd);
+    }
+    close(replica);
+    execve(fork_path, fork_argv, fork_envp);
+    moonbit_pty__fork_fail(efd);
+  } else {
+    /* `free` is not required to preserve `errno`, and the caller reads it right
+     * after we hand back -1. */
+    int er = errno;
+    moonbit_pty__free_strings(fork_envp);
+    moonbit_pty__free_strings(fork_argv);
+    free(fork_path);
+    if (pid < 0) {
+      errno = er;
+      return -1;
+    }
+    return pid;
+  }
+
+envp_fail:
+  moonbit_pty__free_strings(fork_argv);
+argv_fail:
+  free(fork_path);
+  errno = ENOMEM;
+  return -1;
 }
 
 MOONBIT_FFI_EXPORT
 int32_t
-moonbit_pty_child_pid(MoonBitPty *pty) {
-  if (!pty || pty->spawned_pid < 0)
-    return -1;
-  return (int32_t)pty->spawned_pid;
+moonbit_pty_resize(int32_t primary, int32_t rows, int32_t cols) {
+  struct winsize ws = {
+    .ws_row = rows,
+    .ws_col = cols,
+    .ws_xpixel = 0,
+    .ws_ypixel = 0,
+  };
+  return ioctl(primary, TIOCSWINSZ, &ws);
 }
-
-/* ---- shutdown ----------------------------------------------------------- */
 
 MOONBIT_FFI_EXPORT
-void
-moonbit_pty_shutdown(MoonBitPty *pty) {
-  if (!pty || pty->spawned_pid <= 0)
-    return;
-  /*
-   * login_tty() makes the spawned child a session and process-group leader.
-   * Kill that group so descendants cannot keep the PTY slave open and leave a
-   * master read parked forever. The master itself remains open until the
-   * MoonBit-side read/write operation returns and releases its RawFdStream.
-   */
-  kill(-pty->spawned_pid, SIGKILL);
+int32_t
+moonbit_pty_hard_cancel_group(int32_t pid) {
+  return kill(-pid, SIGKILL);
 }
-
-/* ---- close -------------------------------------------------------------- */
 
 MOONBIT_FFI_EXPORT
-void
-moonbit_pty_close(MoonBitPty *pty) {
-  if (!pty)
-    return;
-  if (pty->master_fd >= 0) {
-    close(pty->master_fd);
-    pty->master_fd = -1;
-  }
-  if (pty->slave_fd >= 0) {
-    close(pty->slave_fd);
-    pty->slave_fd = -1;
-  }
-  pty->spawned_pid = -1;
+int32_t
+moonbit_pty_is_executable(const char *path) {
+  struct stat st;
+  return stat(path, &st) == 0 && S_ISREG(st.st_mode) && access(path, X_OK) == 0;
 }
-
-#endif

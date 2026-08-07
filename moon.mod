@@ -3,7 +3,7 @@ name = "moonbit-community/pty"
 version = "0.3.3"
 
 import {
-  "moonbitlang/async@0.20.2",
+  "moonbitlang/async@0.20.3",
 }
 
 readme = "README.md"
