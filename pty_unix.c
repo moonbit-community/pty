@@ -5,11 +5,15 @@
 #include <spawn.h>
 #include <stdint.h>
 #include <stdio.h>
+#define __USE_XOPEN_EXTENDED
+#define __USE_GNU
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#if defined(__APPLE__)
 #include <sys/ttycom.h>
+#endif
 #include <termios.h>
 #include <unistd.h>
 
@@ -177,7 +181,7 @@ fail_primary:
 static inline void MOONBIT_PTY__NORETURN
 moonbit_pty__fork_fail(int32_t efd) {
   int32_t er = errno;
-  write(efd, &er, sizeof(er));
+  ssize_t n = write(efd, &er, sizeof(er));
   _exit(127);
 }
 
