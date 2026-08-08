@@ -1,9 +1,6 @@
 ///|
 #cfg(not(platform="windows"))
 struct Pty {
-  // Shared with the task spawned by `spawn`, which closes `primary` on
-  // cancellation before the `Pty` value itself exists.
-  closed : Ref[Bool]
   primary : @async/raw_fd.RawFdStream
   pid : Int
   result : @async.Task[Int]
@@ -12,18 +9,22 @@ struct Pty {
 ///|
 #cfg(not(platform="windows"))
 #borrow(pty)
-extern "c" fn pty_open(pty : FixedArray[Int], rows~ : Int, cols~ : Int) -> Int = "moonbit_pty_open"
+extern "c" fn pty_open(
+  pty : FixedArray[@async/types.Fd],
+  rows~ : Int,
+  cols~ : Int,
+) -> Int = "moonbit_pty_open"
 
 ///|
 #cfg(not(platform="windows"))
-extern "c" fn pty_close(fd : Int) -> Int = "close"
+extern "c" fn pty_close(fd : @async/types.Fd) -> Int = "close"
 
 ///|
 #cfg(not(platform="windows"))
 #borrow(pty, path, argv, envp, cwd)
 extern "c" fn pty_spawn(
-  pty : FixedArray[Int],
-  efd : Int,
+  pty : FixedArray[@async/types.Fd],
+  efd : @async/types.Fd,
   path : Bytes,
   argv : FixedArray[Bytes],
   envp : FixedArray[Bytes],
@@ -46,7 +47,7 @@ pub async fn[X] spawn(
   inherit_env? : Bool = true,
   cwd? : StringView,
 ) -> Pty {
-  let pty : FixedArray[Int] = [0, 0]
+  let pty : FixedArray[@async/types.Fd] = [0, 0]
   if pty_open(pty, rows~, cols~) < 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
   }
@@ -131,14 +132,13 @@ pub async fn[X] spawn(
       raise error
     }
   }
-  let closed = Ref(false)
   let result = group.spawn() <| () => {
+    defer primary.close()
     @async/process.wait_pid(pid) catch {
       _ if @async.is_being_cancelled() =>
         @async.protect_from_cancel() <| () => {
           @async.with_task_group() <| g => {
             g.spawn_bg(no_wait=true) <| () => {
-              closed.val = true
               primary.close()
               @async.sleep(1000)
               pty_hard_cancel_group(pid) |> ignore()
@@ -149,22 +149,13 @@ pub async fn[X] spawn(
       error => raise error
     }
   }
-  let pty = { closed, primary, pid, result }
-  group.add_defer() <| () => { pty.close() }
-  pty
+  { primary, pid, result }
 }
 
 ///|
 #cfg(not(platform="windows"))
 pub async fn Pty::wait(self : Pty) -> Int {
   return self.result.wait()
-}
-
-///|
-#cfg(not(platform="windows"))
-pub fn Pty::close(self : Pty) -> Unit {
-  self.closed.val = true
-  self.primary.close()
 }
 
 ///|
@@ -193,7 +184,7 @@ pub impl @async/io.Reader for Pty with fn _direct_read(
   max_len~ : Int,
 ) -> Int {
   self.primary._direct_read(buf, offset~, max_len~) catch {
-    @os_error.OSError(errno, ..) if self.closed.val && errno == EIO => 0
+    @os_error.OSError(EIO, ..) => 0
     error => raise error
   }
 }
@@ -211,7 +202,7 @@ pub impl @async/io.Writer for Pty with fn write_once(
 
 ///|
 #cfg(not(platform="windows"))
-extern "c" fn pty_resize(primary : Int, rows~ : Int, cols~ : Int) -> Int = "moonbit_pty_resize"
+extern "c" fn pty_resize(primary : @async/types.Fd, rows~ : Int, cols~ : Int) -> Int = "moonbit_pty_resize"
 
 ///|
 #cfg(not(platform="windows"))
@@ -220,9 +211,6 @@ pub fn Pty::resize(
   rows~ : Int,
   cols~ : Int,
 ) -> Unit raise @os_error.OSError {
-  guard !self.closed.val else {
-    raise @os_error.OSError(9, context="@pty.Pty::resize")
-  }
   if pty_resize(self.primary.fd, rows~, cols~) != 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.Pty::resize")
   }
