@@ -30,7 +30,6 @@ typedef struct MoonBitPty {
   void *thread_handle;  /* child PROCESS_INFORMATION.hThread  */
 #else
   int master_fd;
-  int control_fd;
   int slave_fd;
   int spawned_pid;
 #endif

@@ -1,3 +1,7 @@
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 /*
  * Unix PTY implementation for pty.c.
  *
@@ -231,7 +235,7 @@ moonbit_pty_self_args_flat(void) {
   }
   return out;
 #elif defined(__linux__)
-  int fd = open("/proc/self/cmdline", O_RDONLY);
+  int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
   if (fd < 0) {
     return moonbit_pty_empty_bytes();
   }
@@ -365,12 +369,46 @@ moonbit_pty_open(MoonBitPty *pty, int32_t cols, int32_t rows) {
 
   int master_fd = -1;
   int slave_fd = -1;
+#if defined(__linux__)
+  /* `openpty` returns descriptors before callers can mark them CLOEXEC. A
+   * concurrent `posix_spawn` worker can inherit the slave in that window and
+   * keep an unrelated PTY reader from ever observing EOF. Open both ends with
+   * O_CLOEXEC so each descriptor is protected at creation time. */
+  master_fd = posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC);
+  if (master_fd < 0) {
+    return -1;
+  }
+  if (grantpt(master_fd) < 0 || unlockpt(master_fd) < 0) {
+    int saved_errno = errno;
+    close(master_fd);
+    errno = saved_errno;
+    return -1;
+  }
+  char slave_name[PATH_MAX];
+  int ptsname_error = ptsname_r(master_fd, slave_name, sizeof(slave_name));
+  if (ptsname_error != 0) {
+    close(master_fd);
+    errno = ptsname_error;
+    return -1;
+  }
+  slave_fd = open(slave_name, O_RDWR | O_NOCTTY | O_CLOEXEC);
+  if (slave_fd < 0) {
+    int saved_errno = errno;
+    close(master_fd);
+    errno = saved_errno;
+    return -1;
+  }
+  if (ioctl(slave_fd, TIOCSWINSZ, &ws) < 0) {
+    int saved_errno = errno;
+    close(master_fd);
+    close(slave_fd);
+    errno = saved_errno;
+    return -1;
+  }
+#else
   if (openpty(&master_fd, &slave_fd, NULL, NULL, &ws) < 0) {
     return -1;
   }
-  /* Async tests and applications may spawn several PTYs concurrently. Do not
-   * let one child inherit another terminal's master or slave: any inherited
-   * slave keeps that other terminal's reader from ever observing EOF. */
   int master_fd_flags = fcntl(master_fd, F_GETFD, 0);
   int slave_fd_flags = fcntl(slave_fd, F_GETFD, 0);
   if (
@@ -384,31 +422,11 @@ moonbit_pty_open(MoonBitPty *pty, int32_t cols, int32_t rows) {
     errno = saved_errno;
     return -1;
   }
-  int control_fd = dup(master_fd);
-  if (control_fd < 0) {
-    int saved_errno = errno;
-    close(master_fd);
-    close(slave_fd);
-    errno = saved_errno;
-    return -1;
-  }
-  int control_fd_flags = fcntl(control_fd, F_GETFD, 0);
-  if (
-    control_fd_flags < 0 ||
-    fcntl(control_fd, F_SETFD, control_fd_flags | FD_CLOEXEC) < 0
-  ) {
-    int saved_errno = errno;
-    close(master_fd);
-    close(control_fd);
-    close(slave_fd);
-    errno = saved_errno;
-    return -1;
-  }
+#endif
   moonbit_pty_set_nonblocking(master_fd);
 
   moonbit_pty_init(pty);
   pty->master_fd = master_fd;
-  pty->control_fd = control_fd;
   pty->slave_fd = slave_fd;
   return 0;
 }
@@ -421,6 +439,13 @@ moonbit_pty_bind_slave_to_fd(MoonBitPty *pty, int32_t target_fd) {
     return -1;
   }
   int slave_fd = pty->slave_fd;
+#if defined(__linux__)
+  /* dup2 clears CLOEXEC and would expose target_fd until the following fcntl.
+   * dup3 installs the exact descriptor and CLOEXEC in one syscall. */
+  if (slave_fd != target_fd && dup3(slave_fd, target_fd, O_CLOEXEC) < 0) {
+    return -1;
+  }
+#else
   if (dup2(slave_fd, target_fd) < 0) {
     return -1;
   }
@@ -434,6 +459,7 @@ moonbit_pty_bind_slave_to_fd(MoonBitPty *pty, int32_t target_fd) {
   ) {
     return -1;
   }
+#endif
   if (slave_fd != target_fd) {
     close(slave_fd);
   }
@@ -454,8 +480,8 @@ moonbit_pty_set_child_pid(MoonBitPty *pty, int32_t pid) {
 
 MOONBIT_FFI_EXPORT
 int32_t
-moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
-  if (!pty || pty->control_fd < 0) {
+moonbit_pty_resize(int32_t master_fd, int32_t cols, int32_t rows) {
+  if (master_fd < 0) {
     errno = EINVAL;
     return -1;
   }
@@ -465,7 +491,7 @@ moonbit_pty_resize(MoonBitPty *pty, int32_t cols, int32_t rows) {
   ws.ws_col = (unsigned short)cols;
   ws.ws_row = (unsigned short)rows;
 
-  if (ioctl(pty->control_fd, TIOCSWINSZ, &ws) == 0)
+  if (ioctl(master_fd, TIOCSWINSZ, &ws) == 0)
     return 0;
   return -1;
 }
@@ -516,10 +542,6 @@ moonbit_pty_close(MoonBitPty *pty) {
   if (pty->master_fd >= 0) {
     close(pty->master_fd);
     pty->master_fd = -1;
-  }
-  if (pty->control_fd >= 0) {
-    close(pty->control_fd);
-    pty->control_fd = -1;
   }
   if (pty->slave_fd >= 0) {
     close(pty->slave_fd);

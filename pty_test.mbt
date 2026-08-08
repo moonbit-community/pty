@@ -198,6 +198,22 @@ async test "resize works after spawn" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "resize rejects a closed PTY" {
+  @async.with_task_group(group => {
+    let pty = @pty.spawn(group, ["/bin/sh"])
+    pty.close()
+    let result = try {
+      pty.resize(cols=101, rows=31)
+      false
+    } catch {
+      _ => true
+    }
+    assert_true(result)
+  })
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "wait returns child exit code" {
   @async.with_task_group(group => {
     let pty = @pty.spawn(group, ["sh", "-c", "exit 7"])
