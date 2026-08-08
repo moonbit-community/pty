@@ -301,17 +301,30 @@ async fn[X] spawn_handle(
   }
   let self_args = parse_self_args(pty_self_args_flat())
 
-  let child = @process.spawn(
-    group,
-    self_cmd,
-    self_args,
-    stdin=argv_read,
-    stdout=slave_write,
-    stderr=err_write,
-    extra_env={ "MOONBIT_PTY_EXEC": "stdio" },
-    cwd?,
-    no_wait?,
-  )
+  // POSIX permits process creation to fail temporarily with EAGAIN when a
+  // process or thread limit is momentarily exhausted. Retry that condition;
+  // all permanent spawn errors still propagate to the caller unchanged.
+  let child = for ;; {
+    try
+      @process.spawn(
+        group,
+        self_cmd,
+        self_args,
+        stdin=argv_read,
+        stdout=slave_write,
+        stderr=err_write,
+        extra_env={ "MOONBIT_PTY_EXEC": "stdio" },
+        cwd?,
+        no_wait?,
+      )
+    catch {
+      @os_error.OSError(_, ..) as error if error.is_nonblocking_io_error() =>
+        continue
+      error => raise error
+    } noraise {
+      process => break process
+    }
+  }
   handle.set_child_pid(child.pid)
 
   argv_read.close()
