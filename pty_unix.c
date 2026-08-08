@@ -11,9 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <termios.h>
 #include <unistd.h>
-#include <sys/stat.h>
 
 #if defined(__APPLE__)
 #include <sys/ttycom.h>
@@ -124,36 +124,40 @@ moonbit_pty_open(struct moonbit_pty *pty, int32_t rows, int32_t cols) {
   p = moonbit_pty__fd_dup_cloexec_3(p);
   if (p < 0) {
     er = errno;
-    goto fail_primary;
+    goto fail_to_dup_primary;
   }
 
-  if (grantpt(p) != 0 || unlockpt(p) != 0) {
+  if (grantpt(p) != 0) {
     er = errno;
-    goto fail_primary;
+    goto fail_to_grant_pt;
+  }
+  if (unlockpt(p) != 0) {
+    er = errno;
+    goto fail_to_unlock_pt;
   }
 
   char nm[128];
   if (ptsname_r(p, nm, sizeof(nm)) != 0) {
     er = errno;
-    goto fail_primary;
+    goto fail_to_get_ptsname;
   }
 
   int r = open(nm, O_RDWR | O_NOCTTY | O_CLOEXEC);
   if (r < 0) {
     er = errno;
-    goto fail_primary;
+    goto fail_to_open_replica;
   }
   r = moonbit_pty__fd_dup_cloexec_3(r);
   if (r < 0) {
     er = errno;
-    goto fail_primary;
+    goto fail_to_dup_replica;
   }
 
   struct termios t;
   moonbit_pty_set_termios(&t);
   if (tcsetattr(r, TCSAFLUSH, &t) != 0) {
     er = errno;
-    goto fail_replica;
+    goto fail_to_set_termios;
   }
 
   struct winsize ws = {
@@ -164,15 +168,21 @@ moonbit_pty_open(struct moonbit_pty *pty, int32_t rows, int32_t cols) {
   };
   if (ioctl(r, TIOCSWINSZ, &ws) != 0) {
     er = errno;
-    goto fail_replica;
+    goto fail_to_set_winsize;
   }
   pty->primary = p;
   pty->replica = r;
   return 0;
 
-fail_replica:
+fail_to_set_winsize:
+fail_to_set_termios:
   close(r);
-fail_primary:
+fail_to_dup_replica:
+fail_to_open_replica:
+fail_to_get_ptsname:
+fail_to_unlock_pt:
+fail_to_grant_pt:
+fail_to_dup_primary:
   close(p);
   errno = er;
   return -1;
@@ -225,25 +235,42 @@ moonbit_pty_spawn(
   int32_t efd,
   moonbit_bytes_t path,
   moonbit_bytes_t *argv,
-  moonbit_bytes_t *envp
+  moonbit_bytes_t *envp,
+  moonbit_bytes_t cwd
 ) {
+  int er;
   int replica = pty->replica;
 
   int path_size = Moonbit_array_length(path) + 1;
   char *fork_path = malloc(path_size);
   if (!fork_path) {
-    errno = ENOMEM;
-    return -1;
+    er = ENOMEM;
+    goto fail_to_malloc_path;
   }
   memcpy(fork_path, path, path_size);
 
   char **fork_argv = moonbit_pty__dup_strings(argv);
   if (!fork_argv) {
-    goto argv_fail;
+    er = ENOMEM;
+    goto fail_to_dup_argv;
   }
   char **fork_envp = moonbit_pty__dup_strings(envp);
   if (!fork_envp) {
-    goto envp_fail;
+    er = ENOMEM;
+    goto fail_to_dup_envp;
+  }
+
+  int cwd_size = Moonbit_array_length(cwd) + 1;
+  char *fork_cwd;
+  if (cwd_size == 1) {
+    fork_cwd = NULL;
+  } else {
+    fork_cwd = malloc(cwd_size);
+    if (!fork_cwd) {
+      er = ENOMEM;
+      goto fail_to_malloc_cwd;
+    }
+    memcpy(fork_cwd, cwd, cwd_size);
   }
 
   pid_t pid = moonbit_pty__fork();
@@ -283,13 +310,17 @@ moonbit_pty_spawn(
         dup2(replica, STDERR_FILENO) < 0) {
       moonbit_pty__fork_fail(efd);
     }
+    if (fork_cwd && chdir(fork_cwd) < 0) {
+      moonbit_pty__fork_fail(efd);
+    }
     close(replica);
     execve(fork_path, fork_argv, fork_envp);
     moonbit_pty__fork_fail(efd);
   } else {
     /* `free` is not required to preserve `errno`, and the caller reads it right
      * after we hand back -1. */
-    int er = errno;
+    er = errno;
+    free(fork_cwd);
     moonbit_pty__free_strings(fork_envp);
     moonbit_pty__free_strings(fork_argv);
     free(fork_path);
@@ -300,11 +331,14 @@ moonbit_pty_spawn(
     return pid;
   }
 
-envp_fail:
+fail_to_malloc_cwd:
+  moonbit_pty__free_strings(fork_envp);
+fail_to_dup_envp:
   moonbit_pty__free_strings(fork_argv);
-argv_fail:
+fail_to_dup_argv:
   free(fork_path);
-  errno = ENOMEM;
+fail_to_malloc_path:
+  errno = er;
   return -1;
 }
 
