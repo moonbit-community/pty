@@ -9,9 +9,10 @@ extern "c" fn pty_win32_open(
 
 ///|
 #cfg(platform="windows")
-#borrow(pty, cmd, env, cwd)
+#borrow(hpc, session, cmd, env, cwd)
 extern "c" fn pty_win32_spawn(
-  pty : FixedArray[Handle],
+  hpc : PseudoConsole,
+  session : FixedArray[Handle],
   cmd~ : String,
   env~ : String,
   cwd~ : String,
@@ -48,10 +49,9 @@ extern "c" fn PseudoConsole::close(hpc : PseudoConsole) = "ClosePseudoConsole"
 ///|
 #cfg(platform="windows")
 struct Pty {
-  closed : Ref[Bool]
   input_writer : @async/raw_fd.RawFdStream
   output_reader : @async/raw_fd.RawFdStream
-  hpc : PseudoConsole
+  hpc : Ref[PseudoConsole?]
   pid : Int
   result : @async.Task[Int]
 }
@@ -68,7 +68,7 @@ pub async fn[X] spawn(
   cwd? : StringView,
 ) -> Pty {
   let pty : FixedArray[Handle] = [
-    invalid_handle, invalid_handle, invalid_handle, invalid_handle, invalid_handle,
+    invalid_handle, invalid_handle, invalid_handle,
   ]
   if pty_win32_open(pty, rows~, cols~) < 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.open")
@@ -104,26 +104,39 @@ pub async fn[X] spawn(
     env.to_string()
   }
   let cwd = if cwd is Some(cwd) { cwd.to_owned() } else { "" }
-  let pid = pty_win32_spawn(pty, cmd=cmdline.to_owned(), env~, cwd~)
+  let session : FixedArray[Handle] = [invalid_handle, invalid_handle]
+  let cmd = {
+    let sb = StringBuilder(size_hint=cmdline.length())
+    sb.write_stringview(cmdline)
+    sb.to_string()
+  }
+  let pid = pty_win32_spawn(hpc, session, cmd~, env~, cwd~)
   if pid < 0 {
     input_writer.close()
     output_reader.close()
     hpc.close()
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
   }
-  let process = Process(pty[3])
-  let job = JobObject(pty[4])
-  let closed = Ref(false)
+  let process = Process(session[0])
+  let job = JobObject(session[1])
+  let hpc = Ref(Some(hpc))
+  fn close_pseudo_console() -> Unit {
+    if hpc.val is Some(h) {
+      h.close()
+      hpc.val = None
+    }
+  }
   let result = group.spawn() <| () => {
     defer (if !job.is_invalid() { job.close() })
     defer process.close()
+    defer close_pseudo_console()
     @async/process.wait_pid(pid) catch {
       _ if @async.is_being_cancelled() =>
         @async.protect_from_cancel() <| () => {
           @async.with_task_group() <| g => {
             g.spawn_bg(no_wait=true) <| () => {
-              guard !closed.val else { return }
-              closed.val = true
+              close_pseudo_console()
+              @async.sleep(5000)
               if !job.is_invalid() {
                 job.terminate(1) |> ignore()
               } else {
@@ -136,9 +149,11 @@ pub async fn[X] spawn(
       error => raise error
     }
   }
-  let pty = Pty::{ closed, input_writer, output_reader, hpc, pid, result }
-  group.add_defer() <| () => { pty.close() }
-  pty
+  group.add_defer() <| () => {
+    input_writer.close()
+    output_reader.close()
+  }
+  { input_writer, output_reader, hpc, pid, result }
 }
 
 ///|
@@ -192,7 +207,10 @@ pub fn Pty::resize(
   rows~ : Int,
   cols~ : Int,
 ) -> Unit raise @os_error.OSError {
-  if self.hpc.resize(rows~, cols~) < 0 {
+  guard self.hpc.val is Some(hpc) else {
+    raise @os_error.OSError(9, context="@pty.Pty::resize")
+  }
+  if hpc.resize(rows~, cols~) < 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.Pty::resize")
   }
 }
@@ -235,16 +253,6 @@ extern "c" fn Process::terminate(process : Process, exit_code : UInt) -> Bool = 
 #cfg(platform="windows")
 fn Process::close(self : Process) -> Unit {
   self.0.close()
-}
-
-///|
-#cfg(platform="windows")
-pub fn Pty::close(self : Pty) -> Unit {
-  guard !self.closed.val else { return }
-  self.closed.val = true
-  self.input_writer.close()
-  self.output_reader.close()
-  self.hpc.close()
 }
 
 ///|

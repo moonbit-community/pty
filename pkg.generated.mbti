@@ -14,7 +14,6 @@ pub async fn[X] spawn(@async.TaskGroup[X], rows~ : Int, cols~ : Int, StringView,
 
 // Types and methods
 type Pty
-pub fn Pty::close(Self) -> Unit
 pub fn Pty::pid(Self) -> Int
 pub fn Pty::resize(Self, rows~ : Int, cols~ : Int) -> Unit raise @os_error.OSError
 pub async fn Pty::wait(Self) -> Int

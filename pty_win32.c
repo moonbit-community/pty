@@ -11,6 +11,7 @@
 #include <processthreadsapi.h>
 #include <stdint.h>
 #include <winbase.h>
+#include <wincontypes.h>
 #include <winerror.h>
 #include <winnt.h>
 
@@ -20,6 +21,9 @@ struct moonbit_pty_win32 {
   HANDLE hInputWriter;
   HANDLE hOutputReader;
   HPCON hpc;
+};
+
+struct moonbit_pty_win32_session {
   HANDLE hProcess;
   HANDLE job;
 };
@@ -67,7 +71,8 @@ fail_to_create_input_pipe:
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_win32_spawn(
-  struct moonbit_pty_win32 *pty,
+  HPCON hpc,
+  struct moonbit_pty_win32_session *session,
   moonbit_string_t cmd,
   moonbit_string_t env,
   moonbit_string_t cwd
@@ -77,6 +82,7 @@ moonbit_pty_win32_spawn(
 
   STARTUPINFOEXW si = {0};
   si.StartupInfo.cb = sizeof(si);
+  si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
   SIZE_T lpSize;
   InitializeProcThreadAttributeList(NULL, 1, 0, &lpSize);
   si.lpAttributeList = malloc(lpSize);
@@ -90,8 +96,8 @@ moonbit_pty_win32_spawn(
     goto fail_to_initialize_attribute_list;
   }
   ok = UpdateProcThreadAttribute(
-    si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, pty->hpc,
-    sizeof(pty->hpc), NULL, NULL
+    si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, hpc,
+    sizeof(hpc), NULL, NULL
   );
   if (!ok) {
     dwLastError = GetLastError();
@@ -141,8 +147,8 @@ moonbit_pty_win32_spawn(
   ResumeThread(pi.hThread);
   CloseHandle(pi.hThread);
 
-  pty->hProcess = pi.hProcess;
-  pty->job = job;
+  session->hProcess = pi.hProcess;
+  session->job = job;
   return pi.dwProcessId;
 
 fail_to_create_process:
