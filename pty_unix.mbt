@@ -1,6 +1,7 @@
 ///|
 #cfg(not(platform="windows"))
 struct Pty {
+  closed : Ref[Bool]
   primary : @async/raw_fd.RawFdStream
   pid : Int
   result : @async.Task[Int]
@@ -132,14 +133,20 @@ pub async fn[X] spawn(
       raise error
     }
   }
+  let closed = Ref(false)
+  fn close_primary() {
+    if !closed.val {
+      primary.close()
+      closed.val = true
+    }
+  }
   let result = group.spawn() <| () => {
-    defer primary.close()
     @async/process.wait_pid(pid) catch {
       _ if @async.is_being_cancelled() =>
         @async.protect_from_cancel() <| () => {
           @async.with_task_group() <| g => {
             g.spawn_bg(no_wait=true) <| () => {
-              primary.close()
+              close_primary()
               @async.sleep(1000)
               pty_hard_cancel_group(pid) |> ignore()
             }
@@ -149,7 +156,8 @@ pub async fn[X] spawn(
       error => raise error
     }
   }
-  { primary, pid, result }
+  group.add_defer() <| () => { close_primary() }
+  { closed, primary, pid, result }
 }
 
 ///|
@@ -202,7 +210,15 @@ pub impl @async/io.Writer for Pty with fn write_once(
 
 ///|
 #cfg(not(platform="windows"))
-extern "c" fn pty_resize(primary : @async/types.Fd, rows~ : Int, cols~ : Int) -> Int = "moonbit_pty_resize"
+extern "c" fn pty_resize(
+  primary : @async/types.Fd,
+  rows~ : Int,
+  cols~ : Int,
+) -> Int = "moonbit_pty_resize"
+
+///|
+#cfg(not(platform="windows"))
+const EBADF : Int = 9
 
 ///|
 #cfg(not(platform="windows"))
@@ -211,6 +227,9 @@ pub fn Pty::resize(
   rows~ : Int,
   cols~ : Int,
 ) -> Unit raise @os_error.OSError {
+  if self.closed.val {
+    raise @os_error.OSError(EBADF, context="@pty.Pty::resize")
+  }
   if pty_resize(self.primary.fd, rows~, cols~) != 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.Pty::resize")
   }
