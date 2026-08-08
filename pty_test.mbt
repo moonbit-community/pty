@@ -1,4 +1,5 @@
 ///|
+#cfg(not(platform="windows"))
 async test "@pty.spawn" {
   @async.with_task_group() <| g => {
     let pty = @pty.spawn(g, "/bin/echo", ["echo", "hello"])

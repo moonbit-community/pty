@@ -1,4 +1,5 @@
 ///|
+#cfg(not(platform="windows"))
 struct Pty {
   // Shared with the task spawned by `spawn`, which closes `primary` on
   // cancellation before the `Pty` value itself exists.
@@ -9,13 +10,16 @@ struct Pty {
 }
 
 ///|
+#cfg(not(platform="windows"))
 #borrow(pty)
 extern "c" fn pty_open(pty : FixedArray[Int], rows~ : Int, cols~ : Int) -> Int = "moonbit_pty_open"
 
 ///|
+#cfg(not(platform="windows"))
 extern "c" fn pty_close(fd : Int) -> Int = "close"
 
 ///|
+#cfg(not(platform="windows"))
 #borrow(pty, path, argv, envp, cwd)
 extern "c" fn pty_spawn(
   pty : FixedArray[Int],
@@ -27,9 +31,11 @@ extern "c" fn pty_spawn(
 ) -> Int = "moonbit_pty_spawn"
 
 ///|
+#cfg(not(platform="windows"))
 extern "c" fn pty_hard_cancel_group(pid : Int) -> Int = "moonbit_pty_hard_cancel_group"
 
 ///|
+#cfg(not(platform="windows"))
 pub async fn[X] spawn(
   group : @async.TaskGroup[X],
   rows? : Int = 24,
@@ -149,31 +155,37 @@ pub async fn[X] spawn(
 }
 
 ///|
+#cfg(not(platform="windows"))
 pub async fn Pty::wait(self : Pty) -> Int {
   return self.result.wait()
 }
 
 ///|
+#cfg(not(platform="windows"))
 pub fn Pty::close(self : Pty) -> Unit {
   self.closed.val = true
   self.primary.close()
 }
 
 ///|
+#cfg(not(platform="windows"))
 pub fn Pty::pid(self : Pty) -> Int {
   self.pid
 }
 
 ///|
+#cfg(not(platform="windows"))
 #warnings("-alert_internal")
 pub impl @async/io.Reader for Pty with fn _get_internal_buffer(self : Pty) -> @async/io.ReaderBuffer {
   self.primary._get_internal_buffer()
 }
 
 ///|
+#cfg(not(platform="windows"))
 const EIO : Int = 5
 
 ///|
+#cfg(not(platform="windows"))
 pub impl @async/io.Reader for Pty with fn _direct_read(
   self : Pty,
   buf : FixedArray[Byte],
@@ -187,6 +199,7 @@ pub impl @async/io.Reader for Pty with fn _direct_read(
 }
 
 ///|
+#cfg(not(platform="windows"))
 pub impl @async/io.Writer for Pty with fn write_once(
   self : Pty,
   buf : Bytes,
@@ -197,9 +210,11 @@ pub impl @async/io.Writer for Pty with fn write_once(
 }
 
 ///|
+#cfg(not(platform="windows"))
 extern "c" fn pty_resize(primary : Int, rows~ : Int, cols~ : Int) -> Int = "moonbit_pty_resize"
 
 ///|
+#cfg(not(platform="windows"))
 pub fn Pty::resize(
   self : Pty,
   rows~ : Int,
@@ -214,10 +229,12 @@ pub fn Pty::resize(
 }
 
 ///|
+#cfg(not(platform="windows"))
 #borrow(path)
 extern "c" fn pty_is_executable(path : Bytes) -> Int = "moonbit_pty_is_executable"
 
 ///|
+#cfg(not(platform="windows"))
 fn resolve_path(
   file~ : StringView,
   path~ : StringView,
@@ -268,6 +285,7 @@ fn resolve_path(
 }
 
 ///|
+#cfg(not(platform="windows"))
 test "resolve_path" {
   assert_eq(resolve_path(file="sh", path="/usr/bin:/bin"), b"/bin/sh")
   assert_eq(resolve_path(file="sh", path="/bin:/usr/bin"), b"/bin/sh")

@@ -1,3 +1,4 @@
+#if !defined(_WIN32)
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -10,12 +11,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
 #include <sys/stat.h>
+
 #if defined(__APPLE__)
 #include <sys/ttycom.h>
 #endif
-#include <termios.h>
-#include <unistd.h>
 
 #include "moonbit.h"
 
@@ -330,3 +332,4 @@ moonbit_pty_is_executable(const char *path) {
   struct stat st;
   return stat(path, &st) == 0 && S_ISREG(st.st_mode) && access(path, X_OK) == 0;
 }
+#endif

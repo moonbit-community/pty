@@ -2,6 +2,7 @@ import {
   "moonbitlang/core/encoding/utf8" @encoding/utf8,
   "moonbitlang/core/env",
   "moonbitlang/async",
+  "moonbitlang/async/types" @async/types,
   "moonbitlang/async/io" @async/io,
   "moonbitlang/async/pipe" @async/pipe,
   "moonbitlang/async/raw_fd" @async/raw_fd,
@@ -13,5 +14,5 @@ import {
 supported_targets = "native"
 
 options(
-  "native-stub": [ "pty_unix.c" ],
+  "native-stub": [ "pty.c" ],
 )
