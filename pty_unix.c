@@ -1,13 +1,17 @@
 #if !defined(_WIN32)
+
+/* `grantpt`, `unlockpt` and `ptsname_r` are only declared by glibc's
+ * <stdlib.h> under _GNU_SOURCE, which has to be defined before any system
+ * header pulls in <features.h>. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
-#include <spawn.h>
 #include <stdint.h>
-#include <stdio.h>
-#define __USE_XOPEN_EXTENDED
-#define __USE_GNU
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
