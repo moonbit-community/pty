@@ -32,6 +32,46 @@ async test "@pty.spawn resolves an absolute file without searching PATH" {
 }
 
 ///|
+async fn[T] with_tmpdir(prefix~ : StringView, f : async (String) -> T) -> T {
+  let tmpdir = @async/fs.tmpdir(prefix~)
+  async fn remove_tmpdir() {
+    @async.protect_from_cancel() <| () => {
+      @async/fs.rmdir(tmpdir) catch {
+        _ => ()
+      }
+    }
+  }
+  try f(tmpdir) catch {
+    error => {
+      remove_tmpdir()
+      raise error
+    }
+  } noraise {
+    value => {
+      remove_tmpdir()
+      value
+    }
+  }
+}
+
+///|
+async test "@pty.spawn(cwd~)" {
+  @async.with_task_group() <| group => {
+    with_tmpdir(prefix="moonbit-pty-spawn-cwd") <| tmpdir => {
+      let pty = @pty.spawn(
+        group,
+        "/bin/sh",
+        ["-c", "pwd"],
+        rows=24,
+        cols=80,
+        cwd=tmpdir,
+      )
+      assert_true(pty.read_all().text().contains(tmpdir))
+    }
+  }
+}
+
+///|
 #cfg(platform="windows")
 async test "@pty.spawn (win32)" {
   @async.with_task_group() <| g => {

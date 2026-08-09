@@ -22,7 +22,7 @@ extern "c" fn pty_open(
 extern "c" fn pty_spawn(
   pty : FixedArray[@handle.Handle],
   efd : @handle.Handle,
-  path : Bytes,
+  path : FixedArray[Bytes],
   argv : FixedArray[Bytes],
   envp : FixedArray[Bytes],
   cwd : Bytes,
@@ -60,10 +60,9 @@ pub async fn[X] spawn(
   for k, v in extra_env {
     env[k] = v
   }
-  let path = resolve_path(
+  let path = get_path_candidates(
     file~,
     path=env.get_or_default("PATH", "/usr/bin:/bin"),
-    cwd?,
   )
   // `argv[0]` is `file` verbatim, not the path `resolve_path` picked. This is
   // what `execvp` (hence moonbitlang/async's `posix_spawnp`) does, and programs
@@ -235,51 +234,27 @@ pub fn Pty::resize(
 
 ///|
 #cfg(not(platform="windows"))
-#borrow(path)
-extern "c" fn pty_is_executable(path : Bytes) -> Int = "moonbit_pty_is_executable"
-
-///|
-#cfg(not(platform="windows"))
-fn resolve_path(
+fn get_path_candidates(
   file~ : StringView,
   path~ : StringView,
-  cwd? : StringView,
-) -> Bytes raise @os_error.OSError {
+) -> FixedArray[Bytes] {
   if file.contains_char('/') {
-    if !(file is ['/', ..]) && cwd is Some(cwd) {
-      return @encoding/utf8.encode("\{cwd}/\{file}")
-    } else {
-      return @encoding/utf8.encode(file)
-    }
+    return [@encoding/utf8.encode(file)]
   }
   let view = path.view()
-  let mut os_error : @os_error.OSError? = None
+  let candidates = []
   for p = view, dirp = view {
     match p {
       ([] as rest) | [':', .. rest] => {
         let dir = path[dirp.start_offset():p.start_offset()]
         let absolute = if dir is [] {
-          @encoding/utf8.encode("\{cwd.unwrap_or(".")}/\{file}")
-        } else if dir is ['/', ..] {
-          @encoding/utf8.encode("\{dir}/\{file}")
-        } else if cwd is Some(cwd) {
-          @encoding/utf8.encode("\{cwd}/\{dir}/\{file}")
+          @encoding/utf8.encode(file)
         } else {
-          @encoding/utf8.encode("./\{dir}/\{file}")
+          @encoding/utf8.encode("\{dir}/\{file}")
         }
-        if pty_is_executable(absolute) != 0 {
-          return absolute
-        } else if !(os_error is Some(os_error) && os_error.is_EACCES()) {
-          os_error = Some(
-            @os_error.OSError(@os_error.get_errno(), context="stat"),
-          )
-        }
+        candidates.push(absolute)
         if rest is [] {
-          if os_error is Some(os_error) {
-            raise os_error
-          } else {
-            raise @os_error.OSError(2, context="stat")
-          }
+          break FixedArray::from_array(candidates)
         } else {
           continue rest, rest
         }
@@ -291,17 +266,15 @@ fn resolve_path(
 
 ///|
 #cfg(not(platform="windows"))
-test "resolve_path" {
-  assert_eq(resolve_path(file="sh", path="/usr/bin:/bin"), b"/bin/sh")
-  assert_eq(resolve_path(file="sh", path="/bin:/usr/bin"), b"/bin/sh")
-  assert_eq(
-    resolve_path(file="/usr/bin/sh", path="/bin:/usr/bin"),
+test "get_path_candidates" {
+  assert_eq(get_path_candidates(file="sh", path="/usr/bin:/bin"), [
+    b"/usr/bin/sh", b"/bin/sh",
+  ])
+  assert_eq(get_path_candidates(file="/usr/bin/sh", path="/bin:/usr/bin"), [
     b"/usr/bin/sh",
-  )
-  assert_eq(resolve_path(file="./relative", path="/bin"), b"./relative")
-  assert_true(
-    @test.expect_error(() => {
-      resolve_path(file="nosuchprog", path="/usr/bin:/bin")
-    }).is_ENOENT(),
-  )
+  ])
+  assert_eq(get_path_candidates(file="./relative", path="/bin"), [b"./relative"])
+  assert_eq(get_path_candidates(file="nosuchprog", path="/usr/bin:/bin"), [
+    b"/usr/bin/nosuchprog", b"/bin/nosuchprog",
+  ])
 }

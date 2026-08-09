@@ -11,6 +11,10 @@ import {
   "moonbit-community/pty/internal/handle",
 }
 
+import {
+  "moonbitlang/async/fs" @async/fs,
+} for "test"
+
 supported_targets = "native"
 
 options(
