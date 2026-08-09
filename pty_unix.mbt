@@ -48,9 +48,9 @@ pub async fn[X] spawn(
   if pty_open(pty, rows~, cols~) < 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
   }
-  let pfd = pty[0]
+  let primary_handle = pty[0]
   let replica = pty[1]
-  let primary = @async/raw_fd.RawFdStream::RawFdStream(pfd.0) catch {
+  let primary = @async/raw_fd.RawFdStream::RawFdStream(primary_handle.0) catch {
     error => {
       replica.close()
       raise error
@@ -88,18 +88,18 @@ pub async fn[X] spawn(
   // idempotent, hence the replica being closed early on the success path does
   // not conflict with the handler.
   let pid = try {
-    let (er, ew) = @async/pipe.pipe()
-    let pid = pty_spawn(pty, ew.fd(), path, argv, envp, cwd)
+    let (error_reader, error_writer) = @async/pipe.pipe()
+    let pid = pty_spawn(pty, error_writer.fd(), path, argv, envp, cwd)
     if pid < 0 {
       let errno = @os_error.get_errno()
-      ew.close()
-      er.close()
+      error_writer.close()
+      error_reader.close()
       raise @os_error.OSError(errno, context="@pty.spawn")
     }
-    ew.close()
+    error_writer.close()
     replica.close()
-    defer er.close()
-    try er.read_all().binary() catch {
+    defer error_reader.close()
+    try error_reader.read_all().binary() catch {
       error => {
         pty_hard_cancel_group(pid) |> ignore()
         @async.protect_from_cancel() <| () => {

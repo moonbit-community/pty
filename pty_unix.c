@@ -198,6 +198,7 @@ fail_to_open_primary:
 static inline void MOONBIT_PTY__NORETURN
 moonbit_pty_unix_write_error_exit(int32_t efd, int32_t er) {
   ssize_t n = write(efd, &er, sizeof(er));
+  (void)n;
   _exit(127);
 }
 
