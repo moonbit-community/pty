@@ -2,6 +2,7 @@
 package "moonbit-community/pty/internal/handle"
 
 // Values
+pub let invalid : Handle
 
 // Errors
 

@@ -14,13 +14,8 @@ extern "c" fn Handle::invalid() -> Handle = "moonbit_pty_internal_handle_win32_g
 #cfg(platform="windows")
 pub let invalid : Handle = Handle::invalid()
 
-///|
-#cfg(platform="windows")
-extern "c" fn Handle::null() -> Handle = "moonbit_pty_internal_handle_win32_get_null"
-
-///|
-#cfg(platform="windows")
-pub let null : Handle = Handle::null()
+#cfg(not(platform="windows"))
+pub let invalid : Handle = abort("@handle.invalid is only available on Windows")
 
 ///|
 #cfg(platform="windows")
