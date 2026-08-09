@@ -23,4 +23,3 @@ pub impl @io.Writer for Pty
 // Type aliases
 
 // Traits
-

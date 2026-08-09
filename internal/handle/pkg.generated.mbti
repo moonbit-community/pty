@@ -1,0 +1,15 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbit-community/pty/internal/handle"
+
+// Values
+
+// Errors
+
+// Types and methods
+pub(all) struct Handle(Int)
+pub fn Handle::close(Self) -> Unit
+pub impl Eq for Handle
+
+// Type aliases
+
+// Traits
