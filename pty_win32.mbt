@@ -2,7 +2,7 @@
 #cfg(platform="windows")
 #borrow(pty)
 extern "c" fn pty_win32_open(
-  pty : FixedArray[Handle],
+  pty : FixedArray[@handle.Handle],
   rows~ : Int,
   cols~ : Int,
 ) -> Int = "moonbit_pty_win32_open"
@@ -12,31 +12,11 @@ extern "c" fn pty_win32_open(
 #borrow(hpc, session, cmd, env, cwd)
 extern "c" fn pty_win32_spawn(
   hpc : PseudoConsole,
-  session : FixedArray[Handle],
+  session : FixedArray[@handle.Handle],
   cmd~ : String,
   env~ : String,
   cwd~ : String,
 ) -> Int = "moonbit_pty_win32_spawn"
-
-///|
-#cfg(platform="windows")
-priv struct Handle(@async/types.Fd)
-
-///|
-#cfg(platform="windows")
-extern "c" fn Handle::invalid() -> Handle = "moonbit_pty_win32_get_invalid_handle"
-
-///|
-#cfg(platform="windows")
-extern "c" fn Handle::close(handle : Handle) -> Unit = "CloseHandle"
-
-///|
-#cfg(platform="windows")
-extern "c" fn Handle::is_invalid(self : Handle) -> Bool = "moonbit_pty_win32_is_invalid_handle"
-
-///|
-#cfg(platform="windows")
-let invalid_handle : Handle = Handle::invalid()
 
 ///|
 // Append `arg` to a Windows command line, quoting/escaping it so that
@@ -100,7 +80,7 @@ fn StringBuilder::write_arg_with_windows_escape(
 
 ///|
 #cfg(platform="windows")
-priv struct PseudoConsole(Handle)
+priv struct PseudoConsole(@handle.Handle)
 
 ///|
 #cfg(platform="windows")
@@ -128,8 +108,8 @@ pub async fn[X] spawn(
   inherit_env? : Bool = true,
   cwd? : StringView,
 ) -> Pty {
-  let pty : FixedArray[Handle] = [
-    invalid_handle, invalid_handle, invalid_handle,
+  let pty : FixedArray[@handle.Handle] = [
+    @handle.invalid, @handle.invalid, @handle.invalid,
   ]
   if pty_win32_open(pty, rows~, cols~) < 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.open")
@@ -165,7 +145,7 @@ pub async fn[X] spawn(
     env.to_string()
   }
   let cwd = if cwd is Some(cwd) { cwd.to_owned() } else { "" }
-  let session : FixedArray[Handle] = [invalid_handle, invalid_handle]
+  let session : FixedArray[@handle.Handle] = [@handle.invalid, @handle.invalid]
   // Build the command line the way `CommandLineToArgvW` would parse it back
   // into `[file, ..args]`. `CreateProcessW` mutates this buffer in place, so
   // `to_string` must hand back a fresh heap copy (never a string literal).
@@ -290,7 +270,7 @@ pub async fn Pty::wait(self : Pty) -> Int {
 
 ///|
 #cfg(platform="windows")
-priv struct JobObject(Handle)
+priv struct JobObject(@handle.Handle)
 
 ///|
 #cfg(platform="windows")
@@ -305,12 +285,12 @@ fn JobObject::close(self : JobObject) -> Unit {
 ///|
 #cfg(platform="windows")
 fn JobObject::is_invalid(self : JobObject) -> Bool {
-  self.0.is_invalid()
+  self.0 == @handle.invalid
 }
 
 ///|
 #cfg(platform="windows")
-priv struct Process(Handle)
+priv struct Process(@handle.Handle)
 
 ///|
 #cfg(platform="windows")
@@ -332,4 +312,5 @@ pub fn Pty::pid(self : Pty) -> Int {
 let _unused_packages : Unit = {
   ignore(@encoding/utf8.encode("hello"))
   ignore(@async/pipe.pipe)
+  ignore(@async/types.Fd::equal)
 }

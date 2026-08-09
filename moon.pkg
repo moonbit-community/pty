@@ -9,6 +9,7 @@ import {
   "moonbitlang/async/process" @async/process,
   "moonbitlang/async/os_error",
   "moonbitlang/core/test",
+  "moonbit-community/pty/internal/handle",
 }
 
 supported_targets = "native"

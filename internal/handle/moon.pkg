@@ -1,0 +1,9 @@
+import {
+  "moonbitlang/async/types" @async/types,
+}
+
+supported_targets = "native"
+
+options(
+  "native-stub": [ "handle.c" ],
+)
