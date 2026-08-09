@@ -25,10 +25,18 @@
 7. Decide whether `execve` needs a retry for transient failures
    (e.g. `ETXTBSY`). main's 8c91701 added spawn retries for the old
    helper-based architecture and was dropped in the rewrite rebase.
+8. **Reconcile `args` semantics with Windows.** The Windows side now follows
+   moonbitlang/async's convention: `file` is the program (it becomes both the
+   executable and `argv[0]`) and `args` are the *remaining* arguments
+   (`argv[1..]`), e.g. `spawn(g, "moon", ["version"])`. The unix side still
+   treats `args` as the *full* `argv` (including `argv[0]`) and passes it to
+   `execve` verbatim, so its test reads `spawn(g, "/bin/echo", ["echo", "hello"])`.
+   Align unix to the async model: resolve `file`, then `execve` with
+   `argv = [file-or-argv0, ..args]`, and update the unix test accordingly.
 
 ## Docs
 
-8. Rewrite `README.md`: it still describes the old `openpty()` + helper
+9. Rewrite `README.md`: it still describes the old `openpty()` + helper
    self-spawn architecture, which the rewrite replaced with fork+execve
    on unix and ConPTY on Windows.
 

@@ -39,6 +39,66 @@ extern "c" fn Handle::is_invalid(self : Handle) -> Bool = "moonbit_pty_win32_is_
 let invalid_handle : Handle = Handle::invalid()
 
 ///|
+// Append `arg` to a Windows command line, quoting/escaping it so that
+// `CommandLineToArgvW` (and the C runtime's argv parser) recovers `arg`
+// verbatim. Ported from moonbitlang/async's `write_arg_with_windows_escape`.
+// The rules come from
+// https://learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments:
+// backslashes are literal unless they precede a `"`, in which case each is
+// doubled and the `"` is escaped as `\"`.
+#cfg(platform="windows")
+fn StringBuilder::write_arg_with_windows_escape(
+  builder : StringBuilder,
+  arg : StringView,
+) -> Unit {
+  if arg is "" {
+    builder.write("\"\"")
+    return
+  }
+  // Do not add double quotes if it is unnecessary to do so.
+  // This helps with simple cases when the program is not using C argv syntax,
+  // such as `rundll32.exe`.
+  let need_quote = for char in arg {
+    if char is (' ' | '\t' | '"') {
+      break true
+    }
+  } nobreak {
+    false
+  }
+  if !need_quote {
+    builder.write_stringview(arg)
+    return
+  }
+  let mut segment_start = 0
+  let mut index = 0
+  let mut trailing_backslash = 0
+  fn flush(skip : Int) {
+    if index > segment_start {
+      builder.write_stringview(arg[segment_start:index - trailing_backslash])
+      if trailing_backslash > 0 {
+        builder.write_string(String::make(trailing_backslash * 2, '\\'))
+      }
+    }
+    segment_start = index + skip
+  }
+
+  builder.write_char('"')
+  while index < arg.length() {
+    match arg.code_unit_at(index) {
+      '"' => {
+        flush(1)
+        builder <+ "\\\""
+      }
+      '\\' => trailing_backslash += 1
+      _ => trailing_backslash = 0
+    }
+    index += 1
+  }
+  flush(0)
+  builder.write_char('"')
+}
+
+///|
 #cfg(platform="windows")
 priv struct PseudoConsole(Handle)
 
@@ -60,11 +120,12 @@ struct Pty {
 #cfg(platform="windows")
 pub async fn[X] spawn(
   group : @async.TaskGroup[X],
-  rows~ : Int,
-  cols~ : Int,
-  cmdline : StringView,
-  inherit_env? : Bool = true,
+  rows? : Int = 24,
+  cols? : Int = 80,
+  file : StringView,
+  args : ArrayView[StringView],
   extra_env? : Map[String, String] = Map([]),
+  inherit_env? : Bool = true,
   cwd? : StringView,
 ) -> Pty {
   let pty : FixedArray[Handle] = [
@@ -105,9 +166,15 @@ pub async fn[X] spawn(
   }
   let cwd = if cwd is Some(cwd) { cwd.to_owned() } else { "" }
   let session : FixedArray[Handle] = [invalid_handle, invalid_handle]
+  // Build the command line the way `CommandLineToArgvW` would parse it back
+  // into `[file, ..args]`. `CreateProcessW` mutates this buffer in place, so
+  // `to_string` must hand back a fresh heap copy (never a string literal).
   let cmd = {
-    let sb = StringBuilder(size_hint=cmdline.length())
-    sb.write_stringview(cmdline)
+    let sb = StringBuilder::new()
+    sb.write_arg_with_windows_escape(file)
+    for arg in args {
+      sb..write_char(' ').write_arg_with_windows_escape(arg)
+    }
     sb.to_string()
   }
   let pid = pty_win32_spawn(hpc, session, cmd~, env~, cwd~)
