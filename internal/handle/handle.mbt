@@ -24,8 +24,13 @@ pub let null : Handle = Handle::null()
 
 ///|
 #cfg(platform="windows")
-pub extern "c" fn Handle::close(self : Handle) -> Unit = "CloseHandle"
+extern "c" fn handle_close(handle : Handle) -> Int = "CloseHandle"
 
 ///|
 #cfg(not(platform="windows"))
-pub extern "c" fn Handle::close(self : Handle) -> Unit = "close"
+extern "c" fn handle_close(handle : Handle) -> Int = "close"
+
+///|
+pub fn Handle::close(self : Handle) -> Unit {
+  handle_close(self) |> ignore()
+}

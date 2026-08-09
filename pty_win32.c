@@ -165,16 +165,6 @@ fail_to_malloc_attribute_list:
 }
 
 MOONBIT_FFI_EXPORT
-HANDLE
-moonbit_pty_win32_get_invalid_handle(void) { return INVALID_HANDLE_VALUE; }
-
-MOONBIT_FFI_EXPORT
-int32_t
-moonbit_pty_win32_is_invalid_handle(HANDLE handle) {
-  return handle == INVALID_HANDLE_VALUE;
-}
-
-MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_win32_resize(HPCON hpc, int32_t rows, int32_t cols) {
   COORD size = {(SHORT)cols, (SHORT)rows};

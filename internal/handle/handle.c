@@ -1,3 +1,4 @@
+#if defined(_WIN32)
 #include <windows.h>
 
 #include <handleapi.h>
@@ -12,6 +13,6 @@ moonbit_pty_internal_handle_win32_get_invalid_handle_value(void) {
 
 MOONBIT_FFI_EXPORT
 HANDLE
-moonbit_pty_internal_handle_win32_get_null(void) {
-  return NULL;
-}
+moonbit_pty_internal_handle_win32_get_null(void) { return NULL; }
+
+#endif

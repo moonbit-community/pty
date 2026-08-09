@@ -11,21 +11,17 @@ struct Pty {
 #cfg(not(platform="windows"))
 #borrow(pty)
 extern "c" fn pty_open(
-  pty : FixedArray[@async/types.Fd],
+  pty : FixedArray[@handle.Handle],
   rows~ : Int,
   cols~ : Int,
 ) -> Int = "moonbit_pty_open"
 
 ///|
 #cfg(not(platform="windows"))
-extern "c" fn pty_close(fd : @async/types.Fd) -> Int = "close"
-
-///|
-#cfg(not(platform="windows"))
 #borrow(pty, path, argv, envp, cwd)
 extern "c" fn pty_spawn(
-  pty : FixedArray[@async/types.Fd],
-  efd : @async/types.Fd,
+  pty : FixedArray[@handle.Handle],
+  efd : @handle.Handle,
   path : Bytes,
   argv : FixedArray[Bytes],
   envp : FixedArray[Bytes],
@@ -48,19 +44,19 @@ pub async fn[X] spawn(
   inherit_env? : Bool = true,
   cwd? : StringView,
 ) -> Pty {
-  let pty : FixedArray[@async/types.Fd] = [0, 0]
+  let pty : FixedArray[@handle.Handle] = [0, 0]
   if pty_open(pty, rows~, cols~) < 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
   }
   let pfd = pty[0]
   let rfd = pty[1]
-  let primary = @async/raw_fd.RawFdStream::RawFdStream(pfd) catch {
+  let primary = @async/raw_fd.RawFdStream::RawFdStream(pfd.0) catch {
     error => {
-      pty_close(rfd) |> ignore()
+      rfd.close()
       raise error
     }
   }
-  let replica = @async/raw_fd.RawFdStream::RawFdStream(rfd) catch {
+  let replica = @async/raw_fd.RawFdStream::RawFdStream(rfd.0) catch {
     error => {
       primary.close()
       raise error
@@ -219,7 +215,7 @@ pub impl @async/io.Writer for Pty with fn write_once(
 ///|
 #cfg(not(platform="windows"))
 extern "c" fn pty_resize(
-  primary : @async/types.Fd,
+  primary : @handle.Handle,
   rows~ : Int,
   cols~ : Int,
 ) -> Int = "moonbit_pty_resize"
