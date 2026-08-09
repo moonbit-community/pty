@@ -2,27 +2,33 @@
 
 ## Cross-platform API
 
-1. **`args` means different things on the two platforms.** Windows follows
-   moonbitlang/async: `file` is the program and becomes `argv[0]`, `args` are
-   the *remaining* arguments — `spawn(g, "moon", ["version"])`. Unix resolves
-   `file` to a path but then passes `args` to `execve` as the *full* `argv`,
-   so its test reads `spawn(g, "/bin/echo", ["echo", "hello"])`. Align unix to
-   the async model: `execve(resolved_path, [file, ..args], envp)`, and update
-   `pty_test.mbt`.
-2. **Unify the shared surface into one non-`#cfg` file.** `#cfg` code is not
+1. **Unify the shared surface into one non-`#cfg` file.** `#cfg` code is not
    type-checked on the inactive platform, so every declaration written twice is
-   a silent drift point — items 1, 5 and the fd-lifetime bug fixed in d71d642
-   all came from that. Move `Pty`, the `spawn` signature, `wait`/`pid`/`resize`
-   and the Reader/Writer impls into `pty.mbt`, leaving a per-platform
-   `priv struct Backend` (verified: a `#cfg`-gated `priv struct` can back a
-   field of an ungated struct). Keep `spawn`'s body and both `.c` files split —
-   fork+execve and CreateProcessW share no structure worth abstracting.
+   a silent drift point — the `argv[0]` divergence, the grace period (item 4),
+   and the fd-lifetime bug fixed in d71d642 all came from that. Move `Pty`, the
+   `spawn` signature, `wait`/`pid`/`resize` and the Reader/Writer impls into
+   `pty.mbt`, leaving a per-platform `priv struct Backend` (verified: a
+   `#cfg`-gated `priv struct` can back a field of an ungated struct). Keep
+   `spawn`'s body and both `.c` files split — fork+execve and CreateProcessW
+   share no structure worth abstracting.
+2. Windows does not append `.exe` when `file` has no extension, while
+   moonbitlang/async does. `CreateProcessW` appends it during its own search,
+   but only when the name has no dot at all — `foo.bar` is searched verbatim
+   and fails. Decide whether to match async here.
 
 ## Unix (needs a unix machine to fix & verify)
 
 3. `moonbit_pty_is_executable` returns 0 with a stale `errno` when the path
    exists but is not a regular file; set `errno` explicitly so
    `resolve_path` reports a meaningful error.
+
+   Alternative that removes the function entirely: have `resolve_path` return
+   the *candidate list* instead of one path, dup it before `fork` like `argv`
+   and `envp`, and let the child loop `execve` over the candidates (remembering
+   EACCES, continuing on ENOENT/ENOTDIR). That is what `execvp` does
+   internally, closes the stat-then-exec TOCTOU window, and drops the
+   real-vs-effective-uid mismatch in `access(X_OK)` — all without allocating in
+   the child, which `execvp` itself cannot promise.
 4. Silence the unused-variable warning in `moonbit_pty__fork_fail`
    (`ssize_t n = write(...)`); it is the only warning left under
    `-Wall -Wextra -Wshadow`, on both clang/macOS and gcc/Ubuntu.
@@ -57,7 +63,14 @@
 11. Rewrite `README.md`: it still describes the old `openpty()` + helper
     self-spawn architecture, which the rewrite replaced with fork+execve
     on unix and ConPTY on Windows.
-12. Document that the pty must be drained concurrently: **do not `wait()`
+12. Document that a script needs a shebang. `execvp` (hence
+    moonbitlang/async's `posix_spawnp`) falls back to running `/bin/sh` when
+    `execve` returns ENOEXEC — a pre-`#!` compatibility behavior inherited from
+    the shell. We deliberately do **not** match it: `execve` is called directly,
+    so an extension-less, shebang-less script fails with ENOEXEC instead of
+    silently running under `sh`. Rebuilding the argv for the fallback would
+    also mean allocating in the forked child, which is not permitted here.
+13. Document that the pty must be drained concurrently: **do not `wait()`
     and then `read()`**. A pty master is a bounded kernel queue, and on macOS
     the kernel discards whatever is still queued a few hundred milliseconds
     after the child exits (measured: readable at 600ms, gone at 800ms,

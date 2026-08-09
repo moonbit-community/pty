@@ -75,8 +75,16 @@ pub async fn[X] spawn(
     path=env.get_or_default("PATH", "/usr/bin:/bin"),
     cwd?,
   )
-  let argv = FixedArray::makei(args.length(), i => {
-    @encoding/utf8.encode(args[i])
+  // `argv[0]` is `file` verbatim, not the path `resolve_path` picked. This is
+  // what `execvp` (hence moonbitlang/async's `posix_spawnp`) does, and programs
+  // that dispatch on `argv[0]` — busybox-style multi-call binaries, shells
+  // checking for a leading `-` — need to see what the caller wrote.
+  let argv = FixedArray::makei(args.length() + 1, i => {
+    if i == 0 {
+      @encoding/utf8.encode(file)
+    } else {
+      @encoding/utf8.encode(args[i - 1])
+    }
   })
   let envp = {
     let envp = []
