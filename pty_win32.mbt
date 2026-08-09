@@ -132,17 +132,16 @@ pub async fn[X] spawn(
     }
   }
   let env = {
-    let env = StringBuilder()
-    if inherit_env {
-      for k, v in @env.get_env_vars() {
-        env <+ "\{k}=\{v}\u{0000}"
-      }
-    }
+    let env = if inherit_env { @env.get_env_vars() } else { Map([]) }
     for k, v in extra_env {
-      env <+ "\{k}=\{v}\u{0000}"
+      env[k] = v
     }
-    env.write_char('\u{000}')
-    env.to_string()
+    let sb = StringBuilder()
+    for k, v in env {
+      sb <+ "\{k}=\{v}\u{0000}"
+    }
+    sb.write_char('\u{000}')
+    sb.to_string()
   }
   let cwd = if cwd is Some(cwd) { cwd.to_owned() } else { "" }
   let session : FixedArray[@handle.Handle] = [@handle.invalid, @handle.invalid]
