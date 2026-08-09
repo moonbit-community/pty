@@ -154,7 +154,11 @@ pub async fn[X] spawn(
     for arg in args {
       sb..write_char(' ').write_arg_with_windows_escape(arg)
     }
-    sb.to_string()
+    match sb.to_string() {
+      [.., '.', 'e' | 'E', 'x' | 'X', 'e' | 'E']
+      | [.., '.', 'c' | 'C', 'o' | 'O', 'm' | 'M'] as cmd => cmd
+      cmd => cmd + ".exe"
+    }
   }
   let pid = pty_win32_spawn(hpc, session, cmd~, env~, cwd~)
   if pid < 0 {
