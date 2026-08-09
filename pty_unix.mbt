@@ -49,16 +49,10 @@ pub async fn[X] spawn(
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
   }
   let pfd = pty[0]
-  let rfd = pty[1]
+  let replica = pty[1]
   let primary = @async/raw_fd.RawFdStream::RawFdStream(pfd.0) catch {
     error => {
-      rfd.close()
-      raise error
-    }
-  }
-  let replica = @async/raw_fd.RawFdStream::RawFdStream(rfd.0) catch {
-    error => {
-      primary.close()
+      replica.close()
       raise error
     }
   }
