@@ -9,3 +9,6 @@ _build/
 
 # clangd
 compile_flags.txt
+
+# VSCode
+.vscode/
