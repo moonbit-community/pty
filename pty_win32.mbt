@@ -176,9 +176,8 @@ pub async fn[X] spawn(
   if pty_win32_open(pty, rows~, cols~) < 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.open")
   }
-  let input_writer_handle = pty[0]
-  let output_reader_handle = pty[1]
-  let hpc = PseudoConsole(pty[2])
+  guard! pty is [input_writer_handle, output_reader_handle, hpc_handle]
+  let hpc = PseudoConsole(hpc_handle)
   let input_writer = @async/raw_fd.RawFdStream(input_writer_handle.0) catch {
     error => {
       output_reader_handle.close()
@@ -201,8 +200,9 @@ pub async fn[X] spawn(
     hpc.close()
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
   }
-  let process = Process(session[0])
-  let job = JobObject(session[1])
+  guard! session is [process_handle, job_handle]
+  let process = Process(process_handle)
+  let job = JobObject(job_handle)
   let hpc = Ref(Some(hpc))
   fn close_pseudo_console() -> Unit {
     if hpc.val is Some(h) {
