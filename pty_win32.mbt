@@ -1,5 +1,12 @@
 ///|
 #cfg(platform="windows")
+extern "c" fn pty_win32_get_invalid_handle() -> @handle.Handle = "moonbit_pty_win32_get_invalid_handle"
+
+///|
+let invalid_handle : @handle.Handle = pty_win32_get_invalid_handle()
+
+///|
+#cfg(platform="windows")
 #borrow(pty)
 extern "c" fn pty_win32_open(
   pty : FixedArray[@handle.Handle],
@@ -163,7 +170,7 @@ pub async fn[X] spawn(
     }
   }
   let pty : FixedArray[@handle.Handle] = [
-    @handle.invalid, @handle.invalid, @handle.invalid,
+    invalid_handle, invalid_handle, invalid_handle,
   ]
   if pty_win32_open(pty, rows~, cols~) < 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.open")
@@ -185,7 +192,7 @@ pub async fn[X] spawn(
       raise error
     }
   }
-  let session : FixedArray[@handle.Handle] = [@handle.invalid, @handle.invalid]
+  let session : FixedArray[@handle.Handle] = [invalid_handle, invalid_handle]
   let pid = pty_win32_spawn(hpc, session, cmd~, app~, env~, cwd~)
   if pid < 0 {
     input_writer.close()
@@ -314,7 +321,7 @@ fn JobObject::close(self : JobObject) -> Unit {
 ///|
 #cfg(platform="windows")
 fn JobObject::is_invalid(self : JobObject) -> Bool {
-  self.0 == @handle.invalid
+  self.0 == invalid_handle
 }
 
 ///|

@@ -3,7 +3,3 @@ import {
 }
 
 supported_targets = "native"
-
-options(
-  "native-stub": [ "handle.c" ],
-)

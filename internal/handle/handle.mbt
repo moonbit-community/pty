@@ -8,18 +8,6 @@ pub impl Eq for Handle with fn equal(self : Handle, other : Handle) -> Bool {
 
 ///|
 #cfg(platform="windows")
-extern "c" fn Handle::invalid() -> Handle = "moonbit_pty_internal_handle_win32_get_invalid_handle_value"
-
-///|
-#cfg(platform="windows")
-pub let invalid : Handle = Handle::invalid()
-
-///|
-#cfg(not(platform="windows"))
-pub let invalid : Handle = abort("@handle.invalid is only available on Windows")
-
-///|
-#cfg(platform="windows")
 extern "c" fn handle_close(handle : Handle) -> Int = "CloseHandle"
 
 ///|

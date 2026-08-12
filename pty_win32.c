@@ -18,6 +18,12 @@
 
 #include "moonbit.h"
 
+MOONBIT_FFI_EXPORT
+HANDLE
+moonbit_pty_win32_get_invalid_handle(void) {
+  return INVALID_HANDLE_VALUE;
+}
+
 struct moonbit_pty_win32 {
   HANDLE hInputWriter;
   HANDLE hOutputReader;
