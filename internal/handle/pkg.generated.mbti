@@ -1,13 +1,17 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "moonbit-community/pty/internal/handle"
 
+import {
+  "moonbitlang/async/types",
+}
+
 // Values
 pub let invalid : Handle
 
 // Errors
 
 // Types and methods
-pub(all) struct Handle(Int)
+pub(all) struct Handle(@types.Fd)
 pub fn Handle::close(Self) -> Unit
 pub impl Eq for Handle
 

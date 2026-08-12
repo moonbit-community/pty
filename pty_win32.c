@@ -5,6 +5,7 @@
 #include <consoleapi.h>
 #include <corecrt_search.h>
 #include <errhandlingapi.h>
+#include <fileapi.h>
 #include <handleapi.h>
 #include <jobapi2.h>
 #include <minwindef.h>
@@ -74,6 +75,7 @@ moonbit_pty_win32_spawn(
   HPCON hpc,
   struct moonbit_pty_win32_session *session,
   moonbit_string_t cmd,
+  moonbit_string_t app,
   moonbit_string_t env,
   moonbit_string_t cwd
 ) {
@@ -126,7 +128,7 @@ moonbit_pty_win32_spawn(
 
   PROCESS_INFORMATION pi = {0};
   ok = CreateProcessW(
-    NULL, cmd, NULL, NULL, FALSE,
+    app, cmd, NULL, NULL, FALSE,
     EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT |
       CREATE_SUSPENDED,
     env, cwd, &si.StartupInfo, &pi
@@ -175,6 +177,27 @@ moonbit_pty_win32_resize(HPCON hpc, int32_t rows, int32_t cols) {
   } else {
     return 0;
   }
+}
+
+MOONBIT_FFI_EXPORT
+int32_t
+moonbit_pty_win32_file_exists(moonbit_string_t path) {
+  DWORD attrs = GetFileAttributesW(path);
+  return attrs != INVALID_FILE_ATTRIBUTES &&
+         !(attrs & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+MOONBIT_FFI_EXPORT
+moonbit_string_t
+moonbit_pty_win32_get_full_path_name(moonbit_string_t path) {
+  WCHAR buf[32768];
+  DWORD n = GetFullPathNameW(path, 32768, buf, NULL);
+  if (n == 0 || n >= 32768) {
+    return moonbit_empty_int16_array;
+  }
+  moonbit_string_t result = moonbit_make_string(n, 0);
+  memcpy(result, buf, n * sizeof(WCHAR));
+  return result;
 }
 
 #endif

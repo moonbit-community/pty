@@ -32,6 +32,10 @@ async test "@pty.spawn resolves an absolute file without searching PATH" {
 }
 
 ///|
+let _unused_package : Unit = ignore(@async/fs.opendir)
+
+///|
+#cfg(not(platform="windows"))
 async fn[T] with_tmpdir(prefix~ : StringView, f : async (String) -> T) -> T {
   let tmpdir = @async/fs.tmpdir(prefix~)
   async fn remove_tmpdir() {
@@ -55,6 +59,7 @@ async fn[T] with_tmpdir(prefix~ : StringView, f : async (String) -> T) -> T {
 }
 
 ///|
+#cfg(not(platform="windows"))
 async test "@pty.spawn(cwd~)" {
   @async.with_task_group() <| group => {
     with_tmpdir(prefix="moonbit-pty-spawn-cwd") <| tmpdir => {

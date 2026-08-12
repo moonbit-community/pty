@@ -9,11 +9,12 @@ extern "c" fn pty_win32_open(
 
 ///|
 #cfg(platform="windows")
-#borrow(hpc, session, cmd, env, cwd)
+#borrow(hpc, session, cmd, app, env, cwd)
 extern "c" fn pty_win32_spawn(
   hpc : PseudoConsole,
   session : FixedArray[@handle.Handle],
   cmd~ : String,
+  app~ : String,
   env~ : String,
   cwd~ : String,
 ) -> Int = "moonbit_pty_win32_spawn"
@@ -98,6 +99,10 @@ struct Pty {
 
 ///|
 #cfg(platform="windows")
+const ERROR_FILE_NOT_FOUND : Int = 2
+
+///|
+#cfg(platform="windows")
 pub async fn[X] spawn(
   group : @async.TaskGroup[X],
   rows? : Int = 24,
@@ -108,6 +113,55 @@ pub async fn[X] spawn(
   inherit_env? : Bool = true,
   cwd? : StringView,
 ) -> Pty {
+  let env_map : Map[String, (String, String)] = Map([])
+  if inherit_env {
+    for k, v in @env.get_env_vars() {
+      env_map[k.to_upper()] = (k, v)
+    }
+  }
+  for k, v in extra_env {
+    let uk = k.to_upper()
+    env_map[uk] = if env_map.get(uk) is Some((ok, _)) {
+      (ok, v)
+    } else {
+      (k, v)
+    }
+  }
+  let env = {
+    let sb = StringBuilder()
+    for _, kv in env_map {
+      let (k, v) = kv
+      sb <+ "\{k}=\{v}\u{0000}"
+    }
+    sb.write_char('\u{000}')
+    sb.to_string()
+  }
+  let cwd = {
+    let cwd = if cwd is Some(cwd) { cwd.to_owned() } else { "." }
+    get_full_path_name(cwd)
+  }
+  // Build the command line the way `CommandLineToArgvW` would parse it back
+  // into `[file, ..args]`. `CreateProcessW` mutates this buffer in place, so
+  // `to_string` must hand back a fresh heap copy (never a string literal).
+  let cmd = {
+    let sb = StringBuilder::new()
+    sb.write_arg_with_windows_escape(file)
+    for arg in args {
+      sb..write_char(' ').write_arg_with_windows_escape(arg)
+    }
+    sb.to_string()
+  }
+  let app = {
+    let path = if env_map.get("PATH") is Some((_, path)) { path } else { "" }
+    let candidates = get_path_candidates(file~, path~, cwd~)
+    for candidate in candidates {
+      if win32_file_exists(candidate) {
+        break candidate
+      }
+    } nobreak {
+      raise @os_error.OSError(ERROR_FILE_NOT_FOUND, context="@pty.spawn")
+    }
+  }
   let pty : FixedArray[@handle.Handle] = [
     @handle.invalid, @handle.invalid, @handle.invalid,
   ]
@@ -131,36 +185,8 @@ pub async fn[X] spawn(
       raise error
     }
   }
-  let env = {
-    let env = if inherit_env { @env.get_env_vars() } else { Map([]) }
-    for k, v in extra_env {
-      env[k] = v
-    }
-    let sb = StringBuilder()
-    for k, v in env {
-      sb <+ "\{k}=\{v}\u{0000}"
-    }
-    sb.write_char('\u{000}')
-    sb.to_string()
-  }
-  let cwd = if cwd is Some(cwd) { cwd.to_owned() } else { "" }
   let session : FixedArray[@handle.Handle] = [@handle.invalid, @handle.invalid]
-  // Build the command line the way `CommandLineToArgvW` would parse it back
-  // into `[file, ..args]`. `CreateProcessW` mutates this buffer in place, so
-  // `to_string` must hand back a fresh heap copy (never a string literal).
-  let cmd = {
-    let sb = StringBuilder::new()
-    sb.write_arg_with_windows_escape(file)
-    for arg in args {
-      sb..write_char(' ').write_arg_with_windows_escape(arg)
-    }
-    match sb.to_string() {
-      [.., '.', 'e' | 'E', 'x' | 'X', 'e' | 'E']
-      | [.., '.', 'c' | 'C', 'o' | 'O', 'm' | 'M'] as cmd => cmd
-      cmd => cmd + ".exe"
-    }
-  }
-  let pid = pty_win32_spawn(hpc, session, cmd~, env~, cwd~)
+  let pid = pty_win32_spawn(hpc, session, cmd~, app~, env~, cwd~)
   if pid < 0 {
     input_writer.close()
     output_reader.close()
@@ -316,4 +342,209 @@ pub fn Pty::pid(self : Pty) -> Int {
 let _unused_packages : Unit = {
   ignore(@encoding/utf8.encode("hello"))
   ignore(@async/pipe.pipe)
+}
+
+///|
+#cfg(platform="windows")
+#borrow(path)
+extern "c" fn win32_get_full_path_name(path : String) -> String = "moonbit_pty_win32_get_full_path_name"
+
+///|
+#cfg(platform="windows")
+fn get_full_path_name(path : String) -> String raise @os_error.OSError {
+  let full_path_name = win32_get_full_path_name(path)
+  if full_path_name.is_empty() {
+    raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
+  } else {
+    full_path_name
+  }
+}
+
+///|
+#cfg(platform="windows")
+#borrow(path)
+extern "c" fn win32_file_exists(path : String) -> Bool = "moonbit_pty_win32_file_exists"
+
+///|
+#cfg(platform="windows")
+fn split_path_list(path : StringView) -> FixedArray[String] {
+  let entries = []
+  let entry = StringBuilder()
+  fn flush() {
+    if !entry.is_empty() {
+      entries.push(entry.to_string())
+      entry.reset()
+    }
+  }
+  let mut quoted = false
+  for c in path {
+    match c {
+      '"' => quoted = !quoted
+      ';' if !quoted => flush()
+      c => entry.write_char(c)
+    }
+  }
+  flush()
+  FixedArray::from_array(entries)
+}
+
+///|
+#cfg(platform="windows")
+fn join_path(dir : StringView, file : StringView) -> String {
+  if dir is [.., '/' | '\\'] {
+    "\{dir}\{file}"
+  } else {
+    "\{dir}\\\{file}"
+  }
+}
+
+///|
+#cfg(platform="windows")
+fn append_exe(file : StringView) -> String {
+  for view = file {
+    match view {
+      [.., '.'] => break file.to_owned()
+      [] | [.., '/' | '\\' | ':'] => break "\{file}.exe"
+      [.. rest, _] => continue rest
+    }
+  }
+}
+
+///|
+#cfg(platform="windows")
+fn get_path_candidates(
+  file~ : StringView,
+  path~ : StringView,
+  cwd~ : String,
+) -> FixedArray[String] raise @os_error.OSError {
+  let file = append_exe(file)
+  match (file, cwd) {
+    (
+      ['\\' | '/', '\\' | '/', ..]
+      | ['A'..='Z' | 'a'..='z', ':', '\\' | '/', ..],
+      _,
+    ) => [file]
+    (['\\' | '/', ..], ['A'..='Z' | 'a'..='z' as drive, ..]) =>
+      ["\{drive}:\{file}"]
+    (['\\' | '/', ..], _) => [file]
+    (
+      ['A'..='Z' | 'a'..='z' as file_drive, ':', .. relative_path],
+      ['A'..='Z' | 'a'..='z' as current_drive, ..],
+    ) =>
+      if file_drive
+        .to_ascii_uppercase()
+        .equal(current_drive.to_ascii_uppercase()) {
+        [join_path(cwd, relative_path)]
+      } else {
+        [get_full_path_name(file)]
+      }
+    (['A'..='Z' | 'a'..='z', ':', ..], _) => [get_full_path_name(file)]
+    _ => {
+      if file.contains_any(chars="/\\") {
+        return [join_path(cwd, file)]
+      }
+      split_path_list(path).map(dir => join_path(dir, file))
+    }
+  }
+}
+
+///|
+#cfg(platform="windows")
+test "get_path_candidates" {
+  let cwd = get_full_path_name(".")
+  guard cwd is ['A'..='Z' | 'a'..='z' as drive, ..] else {
+    fail("get_path_candidates: unable to parse current drive")
+  }
+  get_path_candidates(file="echo", path=".\\test_data\\win32", cwd~)
+  |> assert_eq([".\\test_data\\win32\\echo.exe"])
+  get_path_candidates(
+    file="echo",
+    path=".\\test_data;.\\test_data\\win32",
+    cwd~,
+  )
+  |> assert_eq([".\\test_data\\echo.exe", ".\\test_data\\win32\\echo.exe"])
+  get_path_candidates(
+    file="echo",
+    path=";.\\test_data;.\\test_data\\win32",
+    cwd~,
+  )
+  |> assert_eq([".\\test_data\\echo.exe", ".\\test_data\\win32\\echo.exe"])
+  get_path_candidates(
+    file="echo",
+    path=".;.\\test_data;.\\test_data\\win32",
+    cwd~,
+  )
+  |> assert_eq([
+    ".\\echo.exe", ".\\test_data\\echo.exe", ".\\test_data\\win32\\echo.exe",
+  ])
+  get_path_candidates(
+    file="\\\\server\\share\\echo",
+    path=".\\test_data;.\\test_data\\win32",
+    cwd~,
+  )
+  |> assert_eq(["\\\\server\\share\\echo.exe"])
+  get_path_candidates(
+    file="C:\\echo.exe",
+    path=".\\test_data;.\\test_data\\win32",
+    cwd="C:\\Users\\MoonBit",
+  )
+  |> assert_eq(["C:\\echo.exe"])
+  get_path_candidates(
+    file="C:\\echo.exe",
+    path=".\\test_data;.\\test_data\\win32",
+    cwd="D:\\Projects\\Pty",
+  )
+  |> assert_eq(["\{drive}:\\echo.exe"])
+  get_path_candidates(
+    file="D:echo.exe",
+    path=".\\test_data;.\\test_data\\win32",
+    cwd="D:\\Projects\\Pty",
+  )
+  |> assert_eq(["D:\\Projects\\Pty\\echo.exe"])
+  get_path_candidates(
+    file="C:echo.exe",
+    path=".\\test_data;.\\test_data\\win32",
+    cwd="D:\\Projects\\Pty",
+  )
+  |> assert_eq([join_path(cwd, "echo.exe")])
+  get_path_candidates(
+    file="C:echo.exe",
+    path=".\\test_data;.\\test_data\\win32",
+    cwd="\\\\server\\share",
+  )
+  |> assert_eq([join_path(cwd, "echo.exe")])
+  get_path_candidates(
+    file="echo.bat",
+    path=".\\test_data;.\\test_data\\win32",
+    cwd~,
+  )
+  |> assert_eq([".\\test_data\\echo.bat", ".\\test_data\\win32\\echo.bat"])
+  get_path_candidates(
+    file="C:\\echo.bat",
+    path=".\\test_data;.\\test_data\\win32",
+    cwd~,
+  )
+  |> assert_eq(["C:\\echo.bat"])
+  // Relative path
+  get_path_candidates(
+    file="test_data\\win32\\echo.bat",
+    path=".\\test_data;.\\test_data\\win32",
+    cwd~,
+  )
+  |> assert_eq([join_path(cwd, "test_data\\win32\\echo.bat")])
+  get_path_candidates(
+    file="test_data\\win32\\echo",
+    path=".\\test_data;.\\test_data\\win32",
+    cwd~,
+  )
+  |> assert_eq([join_path(cwd, "test_data\\win32\\echo.exe")])
+  // Absolute path with no drive
+  get_path_candidates(file="\\echo", path=".\\test_data", cwd~)
+  |> assert_eq(["\{drive}:\\echo.exe"])
+  get_path_candidates(
+    file="\\echo",
+    path=".\\test_data",
+    cwd="\\\\server\\share",
+  )
+  |> assert_eq(["\\echo.exe"])
 }
