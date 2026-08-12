@@ -455,6 +455,11 @@ test "get_path_candidates" {
   guard cwd is ['A'..='Z' | 'a'..='z' as drive, ..] else {
     fail("get_path_candidates: unable to parse current drive")
   }
+  // A drive letter that is NOT the parent's current drive, for cross-drive
+  // cases below.
+  let other = if drive is ('D' | 'd') { 'C' } else { 'D' }
+  // Bare name: joined to every PATH entry, ".exe" appended; empty entries
+  // are skipped, "." is kept.
   get_path_candidates(file="echo", path=".\\test_data\\win32", cwd~)
   |> assert_eq([".\\test_data\\win32\\echo.exe"])
   get_path_candidates(
@@ -477,12 +482,23 @@ test "get_path_candidates" {
   |> assert_eq([
     ".\\echo.exe", ".\\test_data\\echo.exe", ".\\test_data\\win32\\echo.exe",
   ])
+  // Empty PATH: a bare name gets no candidates.
+  get_path_candidates(file="echo", path="", cwd~) |> assert_eq([])
+  // PATH list parsing: quoted entries may contain a literal ';' and the
+  // quotes are stripped; a trailing separator is not doubled when joining.
+  get_path_candidates(file="echo", path="\"C:\\a;b\";C:\\c", cwd~)
+  |> assert_eq(["C:\\a;b\\echo.exe", "C:\\c\\echo.exe"])
+  get_path_candidates(file="echo", path="C:\\bin\\", cwd~)
+  |> assert_eq(["C:\\bin\\echo.exe"])
+  // UNC (and device) forms: absolute by construction, never searched in
+  // PATH nor joined to cwd.
   get_path_candidates(
     file="\\\\server\\share\\echo",
     path=".\\test_data;.\\test_data\\win32",
     cwd~,
   )
   |> assert_eq(["\\\\server\\share\\echo.exe"])
+  // Drive-absolute: as-is, regardless of cwd's drive.
   get_path_candidates(
     file="C:\\echo.exe",
     path=".\\test_data;.\\test_data\\win32",
@@ -494,25 +510,31 @@ test "get_path_candidates" {
     path=".\\test_data;.\\test_data\\win32",
     cwd="D:\\Projects\\Pty",
   )
-  |> assert_eq(["\{drive}:\\echo.exe"])
+  |> assert_eq(["C:\\echo.exe"])
+  // Drive-relative (X:foo) on the same drive as cwd: joined to cwd.
   get_path_candidates(
     file="D:echo.exe",
     path=".\\test_data;.\\test_data\\win32",
     cwd="D:\\Projects\\Pty",
   )
   |> assert_eq(["D:\\Projects\\Pty\\echo.exe"])
+  // Drive-relative on another drive (or with a UNC cwd): expanded via
+  // GetFullPathNameW against the parent's ambient state. Using the
+  // parent's own drive as X makes the expansion deterministic on any
+  // machine: the parent cwd IS that drive's current directory.
   get_path_candidates(
-    file="C:echo.exe",
+    file="\{drive}:echo.exe",
     path=".\\test_data;.\\test_data\\win32",
-    cwd="D:\\Projects\\Pty",
+    cwd="\{other}:\\Projects\\Pty",
   )
   |> assert_eq([join_path(cwd, "echo.exe")])
   get_path_candidates(
-    file="C:echo.exe",
+    file="\{drive}:echo.exe",
     path=".\\test_data;.\\test_data\\win32",
     cwd="\\\\server\\share",
   )
   |> assert_eq([join_path(cwd, "echo.exe")])
+  // An existing extension is preserved: .bat must not become .bat.exe.
   get_path_candidates(
     file="echo.bat",
     path=".\\test_data;.\\test_data\\win32",
@@ -525,7 +547,13 @@ test "get_path_candidates" {
     cwd~,
   )
   |> assert_eq(["C:\\echo.bat"])
-  // Relative path
+  // ".exe" appending looks at the last component only: a dot in a
+  // directory segment does not count, a trailing dot does.
+  get_path_candidates(file="test_data\\v1.2\\echo", path="", cwd="C:\\x")
+  |> assert_eq(["C:\\x\\test_data\\v1.2\\echo.exe"])
+  get_path_candidates(file="foo.", path="C:\\bin", cwd~)
+  |> assert_eq(["C:\\bin\\foo."])
+  // Relative path with a separator: joined to cwd, PATH ignored.
   get_path_candidates(
     file="test_data\\win32\\echo.bat",
     path=".\\test_data;.\\test_data\\win32",
@@ -538,7 +566,10 @@ test "get_path_candidates" {
     cwd~,
   )
   |> assert_eq([join_path(cwd, "test_data\\win32\\echo.exe")])
-  // Absolute path with no drive
+  get_path_candidates(file=".\\echo", path="ignored", cwd="C:\\proj")
+  |> assert_eq(["C:\\proj\\.\\echo.exe"])
+  // Root-relative (\foo): takes cwd's drive; a UNC cwd has none, so the
+  // path is left for the system to resolve.
   get_path_candidates(file="\\echo", path=".\\test_data", cwd~)
   |> assert_eq(["\{drive}:\\echo.exe"])
   get_path_candidates(
@@ -547,4 +578,16 @@ test "get_path_candidates" {
     cwd="\\\\server\\share",
   )
   |> assert_eq(["\\echo.exe"])
+  // Forward slashes are separators everywhere.
+  get_path_candidates(file="C:/echo.exe", path="ignored", cwd~)
+  |> assert_eq(["C:/echo.exe"])
+  get_path_candidates(file="//server/share/echo", path="ignored", cwd~)
+  |> assert_eq(["//server/share/echo.exe"])
+  get_path_candidates(file="./echo", path="ignored", cwd="C:\\proj")
+  |> assert_eq(["C:\\proj\\./echo.exe"])
+  // Drive letters compare case-insensitively.
+  get_path_candidates(file="d:echo.exe", path="", cwd="D:\\Projects")
+  |> assert_eq(["D:\\Projects\\echo.exe"])
+  get_path_candidates(file="c:\\echo.exe", path="", cwd~)
+  |> assert_eq(["c:\\echo.exe"])
 }
