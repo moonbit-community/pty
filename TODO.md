@@ -9,8 +9,8 @@
    `spawn` signature, `wait`/`pid`/`resize` and the Reader/Writer impls into
    `pty.mbt`, leaving a per-platform `priv struct Backend` (verified: a
    `#cfg`-gated `priv struct` can back a field of an ungated struct). Keep
-   `spawn`'s body and both `.c` files split — fork+execve and CreateProcessW
-   share no structure worth abstracting. The resolver work made the two sides
+   `spawn`'s body and the two platform halves of `pty.c` split — fork+execve
+   and CreateProcessW share no structure worth abstracting. The resolver work made the two sides
    structurally symmetric (pure candidate function + platform-side probe), so
    the unification has a natural seam now.
 2. Unify the cancellation grace period: win32 sleeps 5000ms before the hard
@@ -31,20 +31,12 @@
 
 ## Build & repo hygiene
 
-5. **Edits to `pty_unix.c` / `pty_win32.c` do not trigger a rebuild.**
-   `native-stub` lists only the `pty.c` umbrella, which `#include`s them, and
-   moon does not track included files as build inputs — a changed C stub is
-   silently served from cache until `moon clean`. Both files already carry
-   `#if defined(_WIN32)` / `#if !defined(_WIN32)` guards, so the umbrella can
-   be dropped and both `.c` files listed in `native-stub` directly without
-   duplicate symbols. (This bit us on every `.c` edit during the win32
-   resolver work.)
-6. Consider building the `test_data/win32/*.exe` fixtures from their `.c`
+5. Consider building the `test_data/win32/*.exe` fixtures from their `.c`
    sources in a pre-build step instead of committing compiled binaries.
 
 ## Upstream (moonbitlang/async)
 
-7. Propose the win32 userland resolver upstream: async's Windows spawn still
+6. Propose the win32 userland resolver upstream: async's Windows spawn still
    appends `.exe` by suffix match (`foo.bat` → `foo.bat.exe`) and delegates
    the search to `CreateProcessW(NULL, cmdline, ...)`, so `cwd` does not
    participate in locating the executable and the parent's cwd does. See
