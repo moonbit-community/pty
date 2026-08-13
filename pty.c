@@ -25,7 +25,7 @@
 
 #include "moonbit.h"
 
-struct moonbit_pty {
+struct moonbit_pty_unix {
   int32_t primary;
   int32_t replica;
 };
@@ -40,7 +40,7 @@ struct moonbit_pty {
  * identical across platforms instead of inheriting whatever the driver picks.
  */
 static inline void
-moonbit_pty_set_termios(struct termios *t) {
+moonbit_pty_unix_set_termios(struct termios *t) {
   memset(t, 0, sizeof *t);
   t->c_iflag = ICRNL | IXON | IXANY | IMAXBEL | BRKINT;
 #if defined(IUTF8)
@@ -86,7 +86,7 @@ extern pid_t
 __fork(void) __attribute__((weak_import));
 
 static inline pid_t
-moonbit_pty__fork(void) {
+moonbit_pty_unix_fork(void) {
   if (&__fork == NULL) {
     errno = ENOSYS;
     return -1;
@@ -97,7 +97,7 @@ moonbit_pty__fork(void) {
 #else
 
 static inline pid_t
-moonbit_pty__fork(void) {
+moonbit_pty_unix_fork(void) {
   return fork();
 }
 
@@ -127,7 +127,11 @@ moonbit_pty_unix_openpt(const char *path, int oflags) {
 
 MOONBIT_FFI_EXPORT
 int32_t
-moonbit_pty_open(struct moonbit_pty *pty, int32_t rows, int32_t cols) {
+moonbit_pty_unix_open(
+  struct moonbit_pty_unix *pty,
+  int32_t rows,
+  int32_t cols
+) {
   int saved_errno;
 
   int primary = moonbit_pty_unix_openpt(
@@ -160,7 +164,7 @@ moonbit_pty_open(struct moonbit_pty *pty, int32_t rows, int32_t cols) {
   }
 
   struct termios t;
-  moonbit_pty_set_termios(&t);
+  moonbit_pty_unix_set_termios(&t);
   if (tcsetattr(replica, TCSAFLUSH, &t) != 0) {
     saved_errno = errno;
     goto fail_to_set_termios;
@@ -259,8 +263,8 @@ moonbit_pty_unix_free_strings(char **strings) {
 
 MOONBIT_FFI_EXPORT
 int32_t
-moonbit_pty_spawn(
-  struct moonbit_pty *pty,
+moonbit_pty_unix_spawn(
+  struct moonbit_pty_unix *pty,
   int32_t efd,
   moonbit_bytes_t *path,
   moonbit_bytes_t *argv,
@@ -304,7 +308,7 @@ moonbit_pty_spawn(
     memcpy(fork_cwd, cwd, cwd_size);
   }
 
-  pid_t pid = moonbit_pty__fork();
+  pid_t pid = moonbit_pty_unix_fork();
   if (pid == 0) {
     struct sigaction sa;
     sigemptyset(&sa.sa_mask);
@@ -400,7 +404,7 @@ moonbit_pty_resize(int32_t primary, int32_t rows, int32_t cols) {
 
 MOONBIT_FFI_EXPORT
 int32_t
-moonbit_pty_hard_cancel_group(int32_t pid) {
+moonbit_pty_unix_kill_group(int32_t pid) {
   return kill(-pid, SIGKILL);
 }
 #endif
@@ -427,9 +431,7 @@ moonbit_pty_hard_cancel_group(int32_t pid) {
 
 MOONBIT_FFI_EXPORT
 HANDLE
-moonbit_pty_win32_get_invalid_handle(void) {
-  return INVALID_HANDLE_VALUE;
-}
+moonbit_pty_win32_get_invalid_handle(void) { return INVALID_HANDLE_VALUE; }
 
 struct moonbit_pty_win32 {
   HANDLE hInputWriter;

@@ -10,27 +10,27 @@ struct Pty {
 ///|
 #cfg(not(platform="windows"))
 #borrow(pty)
-extern "c" fn pty_open(
+extern "c" fn pty_unix_open(
   pty : FixedArray[@handle.Handle],
   rows~ : Int,
   cols~ : Int,
-) -> Int = "moonbit_pty_open"
+) -> Int = "moonbit_pty_unix_open"
 
 ///|
 #cfg(not(platform="windows"))
 #borrow(pty, path, argv, envp, cwd)
-extern "c" fn pty_spawn(
+extern "c" fn pty_unix_spawn(
   pty : FixedArray[@handle.Handle],
   efd : @handle.Handle,
   path : FixedArray[Bytes],
   argv : FixedArray[Bytes],
   envp : FixedArray[Bytes],
   cwd : Bytes,
-) -> Int = "moonbit_pty_spawn"
+) -> Int = "moonbit_pty_unix_spawn"
 
 ///|
 #cfg(not(platform="windows"))
-extern "c" fn pty_hard_cancel_group(pid : Int) -> Int = "moonbit_pty_hard_cancel_group"
+extern "c" fn pty_unix_kill_group(pid : Int) -> Int = "moonbit_pty_unix_kill_group"
 
 ///|
 #cfg(not(platform="windows"))
@@ -52,7 +52,7 @@ pub async fn[X] spawn(
   cwd? : StringView,
 ) -> Pty {
   let pty : FixedArray[@handle.Handle] = [0, 0]
-  if pty_open(pty, rows~, cols~) < 0 {
+  if pty_unix_open(pty, rows~, cols~) < 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
   }
   let primary_handle = pty[0]
@@ -110,7 +110,7 @@ pub async fn[X] spawn(
         raise error
       }
     }
-    let pid = pty_spawn(pty, error_writer, path, argv, envp, cwd)
+    let pid = pty_unix_spawn(pty, error_writer, path, argv, envp, cwd)
     if pid < 0 {
       let errno = @os_error.get_errno()
       error_writer.close()
@@ -122,7 +122,7 @@ pub async fn[X] spawn(
     defer error_reader.close()
     try error_reader.read_all().binary() catch {
       error => {
-        pty_hard_cancel_group(pid) |> ignore()
+        pty_unix_kill_group(pid) |> ignore()
         @async.protect_from_cancel() <| () => {
           ignore(
             @async.with_timeout_opt(1000, () => {
@@ -166,7 +166,7 @@ pub async fn[X] spawn(
             g.spawn_bg(no_wait=true) <| () => {
               close_primary()
               @async.sleep(1000)
-              pty_hard_cancel_group(pid) |> ignore()
+              pty_unix_kill_group(pid) |> ignore()
             }
             @async/process.wait_pid(pid)
           }
