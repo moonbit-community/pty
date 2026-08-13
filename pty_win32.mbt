@@ -347,10 +347,7 @@ pub fn Pty::pid(self : Pty) -> Int {
 
 ///|
 #cfg(platform="windows")
-let _unused_packages : Unit = {
-  ignore(@encoding/utf8.encode("hello"))
-  ignore(@async/pipe.pipe)
-}
+let _unused_packages : Unit = ignore(@encoding/utf8.encode("hello"))
 
 ///|
 #cfg(platform="windows")

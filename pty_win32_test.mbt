@@ -1,4 +1,5 @@
 ///|
+#cfg(platform="windows")
 async test "@pty.spawn can spawn file.exe using file" {
   async fn assert_pty_spawn(file : StringView) {
     @async.with_task_group() <| group => {
@@ -15,6 +16,7 @@ async test "@pty.spawn can spawn file.exe using file" {
 }
 
 ///|
+#cfg(platform="windows")
 async test "@pty.spawn can spawn file.exe using cwd" {
   async fn assert_pty_spawn(file : StringView) {
     @async.with_task_group() <| group => {

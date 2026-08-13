@@ -193,6 +193,31 @@ fail_to_open_primary:
   return -1;
 }
 
+/**
+ * Create the spawn error pipe. Both ends are CLOEXEC; the read end is left
+ * BLOCKING on purpose. A blocking fd makes moonbitlang/async read it through
+ * the worker thread pool instead of registering it with kqueue/epoll. On
+ * macOS, a kqueue knote on a pipe fd that is armed while the process fork()s
+ * can miss its final EOF edge (kevent never fires even after every write end
+ * is closed), which deadlocks `spawn` in `error_reader.read_all()`.
+ */
+MOONBIT_FFI_EXPORT
+int32_t
+moonbit_pty_unix_create_error_pipe(int32_t *fds) {
+  if (pipe(fds) < 0) {
+    return -1;
+  }
+  if (fcntl(fds[0], F_SETFD, FD_CLOEXEC) < 0 ||
+      fcntl(fds[1], F_SETFD, FD_CLOEXEC) < 0) {
+    int er = errno;
+    close(fds[0]);
+    close(fds[1]);
+    errno = er;
+    return -1;
+  }
+  return 0;
+}
+
 #define MOONBIT_PTY__NORETURN __attribute__((noreturn))
 
 static inline void MOONBIT_PTY__NORETURN

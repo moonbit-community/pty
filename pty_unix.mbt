@@ -34,6 +34,13 @@ extern "c" fn pty_hard_cancel_group(pid : Int) -> Int = "moonbit_pty_hard_cancel
 
 ///|
 #cfg(not(platform="windows"))
+#borrow(fds)
+extern "c" fn pty_unix_create_error_pipe(
+  fds : FixedArray[@handle.Handle],
+) -> Int = "moonbit_pty_unix_create_error_pipe"
+
+///|
+#cfg(not(platform="windows"))
 pub async fn[X] spawn(
   group : @async.TaskGroup[X],
   rows? : Int = 24,
@@ -88,8 +95,22 @@ pub async fn[X] spawn(
   // idempotent, hence the replica being closed early on the success path does
   // not conflict with the handler.
   let pid = try {
-    let (error_reader, error_writer) = @async/pipe.pipe()
-    let pid = pty_spawn(pty, error_writer.fd(), path, argv, envp, cwd)
+    // The error pipe is a plain blocking pipe read through the worker thread
+    // pool, NOT an async pipe: async pipes are registered with kqueue as
+    // edge-triggered, and on macOS a pipe knote armed across a fork() can
+    // lose its final EOF edge, hanging `read_all` below forever.
+    let efds : FixedArray[@handle.Handle] = [0, 0]
+    if pty_unix_create_error_pipe(efds) < 0 {
+      raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
+    }
+    let error_writer = efds[1]
+    let error_reader = @async/raw_fd.RawFdStream::RawFdStream(efds[0].0) catch {
+      error => {
+        error_writer.close()
+        raise error
+      }
+    }
+    let pid = pty_spawn(pty, error_writer, path, argv, envp, cwd)
     if pid < 0 {
       let errno = @os_error.get_errno()
       error_writer.close()
