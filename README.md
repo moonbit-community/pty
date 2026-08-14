@@ -26,6 +26,10 @@ The pty's resources are released when the task group exits. On cancellation
 the child gets a 5 s grace period, then a hard kill. `Pty::wait` returns the
 child's exit code; call it explicitly when the exit code matters.
 
+By default the task group waits for the child to exit. Pass `no_wait=true`
+(same semantics as `@async/process.spawn`) to let the group exit as soon as
+its own tasks are done, terminating the child instead of waiting for it.
+
 ## Drain the pty concurrently
 
 Do **not** `wait()` first and `read()` afterwards. A pty master is a bounded
