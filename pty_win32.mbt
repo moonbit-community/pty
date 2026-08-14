@@ -93,6 +93,7 @@ priv struct PseudoConsole(@handle.Handle)
 
 ///|
 #cfg(platform="windows")
+#borrow(hpc)
 extern "c" fn PseudoConsole::close(hpc : PseudoConsole) = "ClosePseudoConsole"
 
 ///|
@@ -178,14 +179,14 @@ pub async fn[X] spawn(
   }
   guard! pty is [input_writer_handle, output_reader_handle, hpc_handle]
   let hpc = PseudoConsole(hpc_handle)
-  let input_writer = @async/raw_fd.RawFdStream(input_writer_handle.0) catch {
+  let input_writer = input_writer_handle.to_raw_fd_stream() catch {
     error => {
       output_reader_handle.close()
       hpc.close()
       raise error
     }
   }
-  let output_reader = @async/raw_fd.RawFdStream(output_reader_handle.0) catch {
+  let output_reader = output_reader_handle.to_raw_fd_stream() catch {
     error => {
       input_writer.close()
       hpc.close()
@@ -278,6 +279,7 @@ pub impl @async/io.Writer for Pty with fn write_once(
 
 ///|
 #cfg(platform="windows")
+#borrow(hpc)
 extern "c" fn PseudoConsole::resize(
   hpc : PseudoConsole,
   rows~ : Int,
@@ -311,6 +313,7 @@ priv struct JobObject(@handle.Handle)
 
 ///|
 #cfg(platform="windows")
+#borrow(job)
 extern "c" fn JobObject::terminate(job : JobObject, exit_code : Int) -> Bool = "TerminateJobObject"
 
 ///|
@@ -331,6 +334,7 @@ priv struct Process(@handle.Handle)
 
 ///|
 #cfg(platform="windows")
+#borrow(process)
 extern "c" fn Process::terminate(process : Process, exit_code : UInt) -> Bool = "TerminateProcess"
 
 ///|
