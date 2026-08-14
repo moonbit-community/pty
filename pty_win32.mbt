@@ -57,6 +57,7 @@ pub async fn[X] spawn(
   extra_env? : Map[String, String] = Map([]),
   inherit_env? : Bool = true,
   cwd? : StringView,
+  no_wait? : Bool,
 ) -> Pty {
   let env_map : Map[String, (String, String)] = Map([])
   if inherit_env {
@@ -147,7 +148,7 @@ pub async fn[X] spawn(
       hpc.val = None
     }
   }
-  let result = group.spawn() <| () => {
+  let result = group.spawn(no_wait?) <| () => {
     defer (if !job.is_invalid() { job.close() })
     defer process.close()
     defer close_pseudo_console()

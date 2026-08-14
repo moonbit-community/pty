@@ -50,6 +50,7 @@ pub async fn[X] spawn(
   extra_env? : Map[String, String] = Map([]),
   inherit_env? : Bool = true,
   cwd? : StringView,
+  no_wait? : Bool,
 ) -> Pty {
   let pty : FixedArray[@handle.Handle] = [
     @handle.Handle::invalid(),
@@ -177,7 +178,7 @@ pub async fn[X] spawn(
       closed.val = true
     }
   }
-  let result = group.spawn() <| () => {
+  let result = group.spawn(no_wait?) <| () => {
     @async/process.wait_pid(pid) catch {
       _ if @async.is_being_cancelled() =>
         @async.protect_from_cancel() <| () => {

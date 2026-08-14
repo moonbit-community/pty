@@ -248,3 +248,18 @@ async test "@pty.spawn cancellation kills a running program" {
     None,
   )
 }
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.spawn(no_wait=true) lets the group exit without waiting" {
+  // Same `no_wait` semantics as `@async/process.spawn`: the group exits as
+  // soon as its own body is done, cancelling the wait task, which kills the
+  // child. Completing inside the timeout (instead of blocking on `sleep` for
+  // 3600 seconds until the timeout cancels everything) is the assertion.
+  let completed = @async.with_timeout_opt(2000) <| () => {
+    @async.with_task_group() <| group => {
+      @pty.spawn(group, "sleep", ["3600"], no_wait=true) |> ignore()
+    }
+  }
+  assert_true(completed is Some(_))
+}

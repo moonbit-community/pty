@@ -8,7 +8,7 @@ import {
 }
 
 // Values
-pub async fn[X] spawn(@async.TaskGroup[X], rows? : Int, cols? : Int, StringView, ArrayView[StringView], extra_env? : Map[String, String], inherit_env? : Bool, cwd? : StringView) -> Pty
+pub async fn[X] spawn(@async.TaskGroup[X], rows? : Int, cols? : Int, StringView, ArrayView[StringView], extra_env? : Map[String, String], inherit_env? : Bool, cwd? : StringView, no_wait? : Bool) -> Pty
 
 // Errors
 
