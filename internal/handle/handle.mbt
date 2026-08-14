@@ -27,9 +27,16 @@ pub async fn Handle::to_raw_fd_stream(
 }
 
 ///|
-/// The conventional invalid value on both platforms (-1 is also
+/// `Fd` is an opaque `#external` pointer type on win32, so the invalid value
+/// (INVALID_HANDLE_VALUE) can only be produced by the C side.
+#cfg(platform="windows")
+pub extern "c" fn Handle::invalid() -> Handle = "moonbit_pty_win32_get_invalid_handle"
+
+///|
+/// The conventional invalid value on both platforms (-1 on unix,
 /// INVALID_HANDLE_VALUE on win32); used as the placeholder in out-parameter
 /// arrays the C side fills in.
+#cfg(not(platform="windows"))
 pub fn Handle::invalid() -> Handle {
   Handle(-1)
 }

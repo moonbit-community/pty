@@ -1,10 +1,6 @@
 ///|
 #cfg(platform="windows")
-extern "c" fn pty_win32_get_invalid_handle() -> @handle.Handle = "moonbit_pty_win32_get_invalid_handle"
-
-///|
-#cfg(platform="windows")
-let invalid_handle : @handle.Handle = pty_win32_get_invalid_handle()
+let invalid_handle : @handle.Handle = @handle.Handle::invalid()
 
 ///|
 #cfg(platform="windows")
