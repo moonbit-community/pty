@@ -17,6 +17,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 #if defined(__APPLE__)
@@ -261,6 +262,59 @@ moonbit_pty_unix_free_strings(char **strings) {
   free(strings);
 }
 
+/**
+ * `execve`, retrying while the failure is ETXTBSY. The busy state is
+ * transient when the file was just written: it clears as soon as the last
+ * write descriptor is gone (cf. cmd/go's retry loop, golang.org/issue/22315;
+ * we saw it exactly once, on GitHub's ubuntu runner, and could not reproduce
+ * it anywhere else — see TODO.md). The retry is bounded so a file genuinely
+ * held open for writing still fails, roughly a second later.
+ *
+ * The trailing call is the attempt after the final sleep, and also
+ * guarantees `errno` was set by `execve` rather than by a
+ * signal-interrupted `nanosleep`.
+ */
+static inline int
+moonbit_pty_unix_execve_ignore_etxtbsy(
+  const char *path,
+  char *const *argv,
+  char *const *envp
+) {
+  struct timespec delay = {0, 50 * 1000 * 1000}; /* 50ms */
+  for (int attempt = 0; attempt < 20; attempt++) {
+    execve(path, argv, envp);
+    if (errno != ETXTBSY) {
+      break;
+    }
+    nanosleep(&delay, NULL);
+  }
+  execve(path, argv, envp);
+  return -1;
+}
+
+static inline int
+moonbit_pty_unix_execve_candidates(
+  char **path,
+  char *const *argv,
+  char *const *envp
+) {
+  int execve_errno = ENOENT;
+  for (int i = 0; path[i]; i++) {
+    moonbit_pty_unix_execve_ignore_etxtbsy(path[i], argv, envp);
+    if (errno == EACCES) {
+      execve_errno = EACCES;
+      continue;
+    } else if (errno == ENOENT || errno == ENOTDIR) {
+      continue;
+    } else {
+      execve_errno = errno;
+      break;
+    }
+  }
+  errno = execve_errno;
+  return -1;
+}
+
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_unix_spawn(
@@ -349,21 +403,8 @@ moonbit_pty_unix_spawn(
       moonbit_pty_unix_write_error_exit(efd, errno);
     }
     close(replica);
-    int execve_errno = ENOENT;
-    for (int i = 0; fork_path[i]; i++) {
-      if (execve(fork_path[i], fork_argv, fork_envp) < 0) {
-        if (errno == EACCES) {
-          execve_errno = EACCES;
-          continue;
-        } else if (errno == ENOENT || errno == ENOTDIR) {
-          continue;
-        } else {
-          execve_errno = errno;
-          break;
-        }
-      }
-    }
-    moonbit_pty_unix_write_error_exit(efd, execve_errno);
+    moonbit_pty_unix_execve_candidates(fork_path, fork_argv, fork_envp);
+    moonbit_pty_unix_write_error_exit(efd, errno);
   } else {
     /* `free` is not required to preserve `errno`, and the caller reads it right
      * after we hand back -1. */

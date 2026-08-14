@@ -1,38 +1,21 @@
 # TODO
 
-## Unix
+## Unix — do not regress
 
-1. **ETXTBSY on Linux CI — merge blocker; reproduce on a Linux box, then
-   decide the fix there.** PR #18's ubuntu job fails (run 31773488278):
-   `@pty.spawn resolves a relative file against cwd` gets
-   `OSError("@pty.spawn: Text file busy")` — the test writes `echo.sh` via
-   `@async/fs.write_file` and spawns it immediately. macOS never hits this.
-
-   What we know so far (2026-08-14):
-   - The candidate loop treats ETXTBSY as fatal (only EACCES/ENOENT/ENOTDIR
-     continue); main's 8c91701 had spawn retries and the rewrite dropped them.
-   - Mechanism status (updated 2026-08-14, later): BOTH in-process theories
-     are dead. moonbitlang/async's Linux backend is epoll + worker thread
-     pool (no io_uring), and `File::close` → `IoHandle::close` →
-     `fd_util.close` is a synchronous bare close(2) on the calling thread
-     (fd_util.mbt:58) — the write fd is physically closed before
-     `write_file` returns, sequenced strictly before our fork. From source,
-     no in-process window exists. The execve-time writer is therefore
-     probably OUTSIDE our process (something on the runner opening fresh
-     files O_RDWR?), or a mechanism not yet identified.
-   - Frequency: exactly ONE occurrence so far (run 31773488278); the four
-     earlier red runs were unrelated win32 dev failures. 100 local
-     `moon test` runs on a fast Linux box did not reproduce — each run is a
-     single write+spawn trial, so that bounds little.
-   - Next probes: (i) a scratch stress test looping
-     write_file → spawn → wait ~1000×/run (3 orders of magnitude more
-     trials), under `taskset -c 0,1` plus background load to mimic the
-     2-core runner; (ii) make CI self-diagnosing — temporary commit where
-     the test catches ETXTBSY, immediately retries (an instant success
-     proves transience and measures the window) AND scans /proc/*/fd via
-     readlink for the holder, failing with both findings; optionally a
-     workflow_dispatch stress job on ubuntu-latest for real-environment
-     trials.
+- `execve` retries ETXTBSY (bounded: 20 × 50ms, plus a final attempt) in
+  `moonbit_pty_unix_execve_ignore_etxtbsy`. Decided 2026-08-14 after the
+  write-a-script-then-spawn test failed once on GitHub's ubuntu runner
+  (run 31773488278) and the failure could not be reproduced anywhere else:
+  100× `moon test` plus ~1000× write+spawn stress under `taskset -c 0,1`
+  with background load on real Linux hardware all came back clean, and
+  source reading rules out any in-process window (async's Linux backend is
+  epoll + thread pool, and `File::close` → `fd_util.close` is a synchronous
+  bare close(2), sequenced strictly before our fork). Prior art: cmd/go
+  retries unbounded at the call site that knows the error is transient
+  (golang.org/issue/62221); os/exec never retries (golang.org/issue/22315).
+  If CI ever reports ETXTBSY again *through* the retry, the file is being
+  held open persistently by something on the runner — investigate that,
+  don't just raise the bound.
    - Prior art is split by layer, not by project. Go's os/exec does NOT
      auto-retry (golang/go#22315, still open: a general spawn library cannot
      tell a transient pre-exec-window fd from a file legitimately held open
