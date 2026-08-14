@@ -7,6 +7,9 @@ pub impl Eq for Handle with fn equal(self : Handle, other : Handle) -> Bool {
 }
 
 ///|
+pub extend Handle with Eq::{equal, not_equal}
+
+///|
 #cfg(platform="windows")
 extern "c" fn handle_close(handle : Handle) -> Int = "CloseHandle"
 
