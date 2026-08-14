@@ -1,6 +1,19 @@
-# TODO
+# Invariants — do not regress
 
-## Unix — do not regress
+Hard-won conclusions from debugging, and decision records with their
+rationale. Nothing here is pending work; it is documented so it doesn't get
+"fixed" back into a bug.
+
+## Both platforms
+
+- The cancellation grace period is 5000ms on both platforms (decided
+  2026-08-14): it matches the ~5s Windows itself grants on CTRL_CLOSE_EVENT,
+  and unix follows for cross-platform consistency. The value lives in both
+  `pty_unix.mbt` and `pty_win32.mbt`; `#cfg` means the inactive platform is
+  not type-checked, so a change to one side cannot be caught by the compiler
+  on the other — keep them in sync by hand.
+
+## Unix
 
 - `execve` retries ETXTBSY (bounded: 20 × 50ms, plus a final attempt) in
   `moonbit_pty_unix_execve_ignore_etxtbsy`. Decided 2026-08-14 after the
@@ -10,33 +23,27 @@
   with background load on real Linux hardware all came back clean, and
   source reading rules out any in-process window (async's Linux backend is
   epoll + thread pool, and `File::close` → `fd_util.close` is a synchronous
-  bare close(2), sequenced strictly before our fork). Prior art: cmd/go
-  retries unbounded at the call site that knows the error is transient
-  (golang.org/issue/62221); os/exec never retries (golang.org/issue/22315).
+  bare close(2), sequenced strictly before our fork).
+
+  Prior art is split by layer, not by project. Go's os/exec does NOT
+  auto-retry (golang/go#22315, still open: a general spawn library cannot
+  tell a transient pre-exec-window fd from a file legitimately held open for
+  writing), and neither do Rust (rust-lang/rust#114554) nor .NET
+  (dotnet/runtime#58964). But cmd/go — the caller that KNOWS it just wrote
+  the binary — retries in an unbounded no-backoff loop (golang/go#62221,
+  landed 1.22, backported 1.21): "we know that they should resolve quickly
+  (the ETXTBSY error will resolve as soon as the subprocess holding the
+  descriptor open reaches its 'exec' call), we retry them in a loop." This
+  library sits between the two: pty users commonly write-a-script-then-spawn,
+  and the async runtime itself may manufacture the window (so callers can't
+  avoid it with fd discipline) — hence the bounded retry. Win32 has no
+  ETXTBSY, so platform symmetry is unaffected.
+
   If CI ever reports ETXTBSY again *through* the retry, the file is being
   held open persistently by something on the runner — investigate that,
   don't just raise the bound.
-   - Prior art is split by layer, not by project. Go's os/exec does NOT
-     auto-retry (golang/go#22315, still open: a general spawn library cannot
-     tell a transient pre-exec-window fd from a file legitimately held open
-     for writing). But cmd/go — the caller that KNOWS it just wrote the
-     binary — retries in an unbounded no-backoff loop (golang/go#62221,
-     landed 1.22, backported 1.21): "we know that they should resolve
-     quickly (the ETXTBSY error will resolve as soon as the subprocess
-     holding the descriptor open reaches its 'exec' call), we retry them in
-     a loop." Rust (#114554) and .NET (dotnet/runtime#58964) also have no
-     library-level retry.
-   - Options: (a) os/exec-style — keep single execve, retry in the test
-     that writes-then-spawns; (b) cmd/go-style but bounded, in the C
-     candidate loop (e.g. 20 × 50ms nanosleep on ETXTBSY). Claude leans
-     (b): pty users commonly write-a-script-then-spawn, the async runtime
-     itself may manufacture the window (so callers can't avoid it with fd
-     discipline), and win32 has no ETXTBSY so symmetry is unaffected.
-     Decide after reproducing.
 
-## Windows ConPTY — do not regress
-
-Hard-won conclusions from debugging; keep these invariants:
+## Windows ConPTY
 
 - `moonbit_pty_win32_spawn` must set `STARTF_USESTDHANDLES` with null std
   handles. Without it, `CreateProcessW` duplicates the parent's redirected
@@ -65,9 +72,3 @@ Hard-won conclusions from debugging; keep these invariants:
   error-path tests in `pty_win32_test.mbt`. `CreateProcessW` on a text file
   named `foo.exe` returns ERROR_EXE_MACHINE_TYPE_MISMATCH (216) on Windows 11,
   not the classic ERROR_BAD_EXE_FORMAT (193) — the test accepts both.
-- The cancellation grace period is 5000ms on both platforms (decided
-  2026-08-14): it matches the ~5s Windows itself grants on CTRL_CLOSE_EVENT,
-  and unix follows for cross-platform consistency. The value lives in both
-  `pty_unix.mbt` and `pty_win32.mbt`; `#cfg` means the inactive platform is
-  not type-checked, so a change to one side cannot be caught by the compiler
-  on the other — keep them in sync by hand.

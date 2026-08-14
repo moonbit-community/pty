@@ -267,8 +267,8 @@ moonbit_pty_unix_free_strings(char **strings) {
  * transient when the file was just written: it clears as soon as the last
  * write descriptor is gone (cf. cmd/go's retry loop, golang.org/issue/22315;
  * we saw it exactly once, on GitHub's ubuntu runner, and could not reproduce
- * it anywhere else — see TODO.md). The retry is bounded so a file genuinely
- * held open for writing still fails, roughly a second later.
+ * it anywhere else — see docs/invariants.md). The retry is bounded so a
+ * file genuinely held open for writing still fails, roughly a second later.
  *
  * The trailing call is the attempt after the final sleep, and also
  * guarantees `errno` was set by `execve` rather than by a
