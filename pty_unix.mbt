@@ -57,9 +57,21 @@ pub async fn[X] spawn(
   }
   let primary_handle = pty[0]
   let replica = pty[1]
+  // `Handle::close` is a bare close(2): closing twice would hit whatever
+  // unrelated fd has been handed the recycled number in between (the worker
+  // pool and wait_pid allocate fds concurrently), so every close of the
+  // replica is funneled through this guard.
+  let mut replica_closed = false
+  fn close_replica() {
+    if !replica_closed {
+      replica.close()
+      replica_closed = true
+    }
+  }
+
   let primary = @async/raw_fd.RawFdStream::RawFdStream(primary_handle.0) catch {
     error => {
-      replica.close()
+      close_replica()
       raise error
     }
   }
@@ -91,9 +103,10 @@ pub async fn[X] spawn(
   }
   let cwd = if cwd is Some(cwd) { @encoding/utf8.encode(cwd) } else { b"" }
   // The pty is owned by this function until a `Pty` exists to hang the group
-  // defer off, so every failure below has to close both ends itself. `close` is
-  // idempotent, hence the replica being closed early on the success path does
-  // not conflict with the handler.
+  // defer off, so every failure below has to close both ends itself. The
+  // replica is closed early on the success path, before the error-pipe read
+  // can raise into the catch handler — `close_replica` keeps that from
+  // becoming a double close.
   let pid = try {
     // The error pipe is a plain blocking pipe read through the worker thread
     // pool, NOT an async pipe: async pipes are registered with kqueue as
@@ -118,7 +131,7 @@ pub async fn[X] spawn(
       raise @os_error.OSError(errno, context="@pty.spawn")
     }
     error_writer.close()
-    replica.close()
+    close_replica()
     defer error_reader.close()
     try error_reader.read_all().binary() catch {
       error => {
@@ -147,7 +160,7 @@ pub async fn[X] spawn(
   } catch {
     error => {
       primary.close()
-      replica.close()
+      close_replica()
       raise error
     }
   }
