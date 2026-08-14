@@ -11,15 +11,28 @@
    What we know so far (2026-08-14):
    - The candidate loop treats ETXTBSY as fatal (only EACCES/ENOENT/ENOTDIR
      continue); main's 8c91701 had spawn retries and the rewrite dropped them.
-   - Suspected mechanism: the same "racing with itself" shape as
-     rust-lang/rust#114554 — a window between `write_file`'s fd being
-     physically closed and our fork, so the child's execve still sees the
-     file open for writing. moonbitlang/async's Linux backend is epoll +
-     worker thread pool (no io_uring — an earlier io_uring/delayed-fput
-     theory was wrong). NOT confirmed; verify on Linux. Useful probes:
-     `moon test` in a loop for flake rate; `strace -f` around the failing
-     spawn; read async's `IoHandle::close` on Linux to see whether close(2)
-     is deferred past `File::close` returning.
+   - Mechanism status (updated 2026-08-14, later): BOTH in-process theories
+     are dead. moonbitlang/async's Linux backend is epoll + worker thread
+     pool (no io_uring), and `File::close` → `IoHandle::close` →
+     `fd_util.close` is a synchronous bare close(2) on the calling thread
+     (fd_util.mbt:58) — the write fd is physically closed before
+     `write_file` returns, sequenced strictly before our fork. From source,
+     no in-process window exists. The execve-time writer is therefore
+     probably OUTSIDE our process (something on the runner opening fresh
+     files O_RDWR?), or a mechanism not yet identified.
+   - Frequency: exactly ONE occurrence so far (run 31773488278); the four
+     earlier red runs were unrelated win32 dev failures. 100 local
+     `moon test` runs on a fast Linux box did not reproduce — each run is a
+     single write+spawn trial, so that bounds little.
+   - Next probes: (i) a scratch stress test looping
+     write_file → spawn → wait ~1000×/run (3 orders of magnitude more
+     trials), under `taskset -c 0,1` plus background load to mimic the
+     2-core runner; (ii) make CI self-diagnosing — temporary commit where
+     the test catches ETXTBSY, immediately retries (an instant success
+     proves transience and measures the window) AND scans /proc/*/fd via
+     readlink for the holder, failing with both findings; optionally a
+     workflow_dispatch stress job on ubuntu-latest for real-environment
+     trials.
    - Prior art is split by layer, not by project. Go's os/exec does NOT
      auto-retry (golang/go#22315, still open: a general spawn library cannot
      tell a transient pre-exec-window fd from a file legitimately held open
