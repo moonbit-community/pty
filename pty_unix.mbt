@@ -184,7 +184,9 @@ pub async fn[X] spawn(
           @async.with_task_group() <| g => {
             g.spawn_bg(no_wait=true) <| () => {
               close_primary()
-              @async.sleep(1000)
+              // Grace period before the hard kill; keep in sync with the
+              // win32 side (pty_win32.mbt), which is not type-checked here.
+              @async.sleep(5000)
               pty_unix_kill_group(pid) |> ignore()
             }
             @async/process.wait_pid(pid)

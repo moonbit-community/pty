@@ -157,6 +157,9 @@ pub async fn[X] spawn(
           @async.with_task_group() <| g => {
             g.spawn_bg(no_wait=true) <| () => {
               close_pseudo_console()
+              // Grace period before the hard kill; matches the ~5s the OS
+              // itself grants on CTRL_CLOSE_EVENT. Keep in sync with the
+              // unix side (pty_unix.mbt), which is not type-checked here.
               @async.sleep(5000)
               if !job.is_invalid() {
                 job.terminate(1) |> ignore()
