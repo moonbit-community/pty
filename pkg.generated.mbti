@@ -14,9 +14,22 @@ pub async fn[X] spawn(@async.TaskGroup[X], rows? : Int, cols? : Int, StringView,
 
 // Types and methods
 type Pty
+#deprecated
+pub async fn Pty::_direct_read(Self, FixedArray[Byte], offset~ : Int, max_len~ : Int) -> Int
+#deprecated
+pub fn Pty::_get_internal_buffer(Self) -> @io.ReaderBuffer
+pub async fn Pty::drop(Self, Int) -> Int
 pub fn Pty::pid(Self) -> Int
+pub async fn Pty::read(Self, FixedArray[Byte], offset? : Int, max_len? : Int) -> Int
+pub async fn Pty::read_all(Self) -> &@io.Data
+pub async fn Pty::read_exactly(Self, Int) -> Bytes
+pub async fn Pty::read_some(Self, max_len? : Int) -> Bytes?
+pub async fn Pty::read_until(Self, StringView) -> String?
 pub fn Pty::resize(Self, rows~ : Int, cols~ : Int) -> Unit raise @os_error.OSError
 pub async fn Pty::wait(Self) -> Int
+pub async fn Pty::write(Self, &@io.Data) -> Unit
+pub async fn Pty::write_once(Self, Bytes, offset~ : Int, len~ : Int) -> Int
+pub async fn Pty::write_reader(Self, &@io.Reader) -> Unit
 pub impl @io.Reader for Pty
 pub impl @io.Writer for Pty
 

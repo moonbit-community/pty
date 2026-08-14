@@ -13,7 +13,9 @@ pub fn borrow_raw_fd_stream(@raw_fd.RawFdStream) -> Handle
 // Types and methods
 type Handle
 pub fn Handle::close(Self) -> Unit
+pub fn Handle::equal(Self, Self) -> Bool
 pub fn Handle::invalid() -> Self
+pub fn Handle::not_equal(Self, Self) -> Bool
 pub async fn Handle::to_raw_fd_stream(Self) -> @raw_fd.RawFdStream
 pub impl Eq for Handle
 
