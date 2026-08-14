@@ -42,6 +42,10 @@ const EACCES : Int = 13
 
 ///|
 #cfg(not(platform="windows"))
+const EBADF : Int = 9
+
+///|
+#cfg(not(platform="windows"))
 async test "@pty.spawn" {
   @async.with_task_group() <| g => {
     // `file` is looked up in PATH and becomes `argv[0]`; `args` is `argv[1..]`.
@@ -140,6 +144,46 @@ async test "@pty.spawn raises EACCES for a file without execute permission" {
         _ => fail("expected spawn without execute permission to raise EACCES")
       }
     }
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.spawn applies rows/cols and resize updates the winsize" {
+  @async.with_task_group() <| group => {
+    // `stty size` reports the tty winsize as "rows cols"; `read` holds the
+    // child until the resize below has happened, so the two reports are
+    // strictly ordered. `-echo` keeps the newline we write out of the
+    // output stream. The sizes are chosen to make the first report exactly
+    // 8 bytes ("31 113\r\n") for read_exactly.
+    let pty = @pty.spawn(
+      group,
+      "sh",
+      ["-c", "stty -echo; stty size; read _; stty size"],
+      rows=31,
+      cols=113,
+    )
+    assert_eq(pty.read_exactly(8), b"31 113\r\n")
+    pty.resize(rows=20, cols=100)
+    pty.write("\n")
+    assert_eq(pty.read_all().text(), "20 100\r\n")
+    assert_eq(pty.wait(), 0)
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.Pty::resize raises EBADF after the group closed the pty" {
+  let mut pty : @pty.Pty? = None
+  @async.with_task_group() <| group => {
+    pty = Some(@pty.spawn(group, "true", []))
+  }
+  guard pty is Some(pty) else { fail("pty was not spawned") }
+  try pty.resize(rows=10, cols=10) catch {
+    @os_error.OSError(EBADF, ..) => ()
+    error => raise error
+  } noraise {
+    _ => fail("expected resize on a closed pty to raise EBADF")
   }
 }
 
