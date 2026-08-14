@@ -22,13 +22,6 @@ event loop instead of blocking the thread.
 })
 ```
 
-`file` and `args` become the child's argv. `file` is passed as `argv[0]`
-verbatim on both platforms, while the executable actually launched is
-resolved separately (absolute / relative-to-`cwd` / bare-name-through-PATH,
-following libuv and Go). The child's environment is the parent's with
-`extra_env` merged on top. The exact resolution and merge rules are in
-[docs/internals.md](docs/internals.md).
-
 The pty's resources are released when the task group exits. On cancellation
 the child gets a 5 s grace period, then a hard kill. `Pty::wait` returns the
 child's exit code; call it explicitly when the exit code matters.
