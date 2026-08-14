@@ -2,26 +2,18 @@
 
 ## Cross-platform API
 
-1. **Unify the shared surface into one non-`#cfg` file.** `#cfg` code is not
-   type-checked on the inactive platform, so every declaration written twice is
-   a silent drift point — the `argv[0]` divergence, the grace period (item 2),
-   and the fd-lifetime bug fixed in d71d642 all came from that. Move `Pty`, the
-   `spawn` signature, `wait`/`pid`/`resize` and the Reader/Writer impls into
-   `pty.mbt`, leaving a per-platform `priv struct Backend` (verified: a
-   `#cfg`-gated `priv struct` can back a field of an ungated struct). Keep
-   `spawn`'s body and the two platform halves of `pty.c` split — fork+execve
-   and CreateProcessW share no structure worth abstracting. The resolver work made the two sides
-   structurally symmetric (pure candidate function + platform-side probe), so
-   the unification has a natural seam now.
-2. Unify the cancellation grace period: win32 sleeps 5000ms before the hard
-   kill, unix sleeps 1000ms.
+1. Unify the cancellation grace period: win32 sleeps 5000ms before the hard
+   kill, unix sleeps 1000ms. (Unifying the whole shared surface into one
+   non-`#cfg` file was considered and dropped 2026-08-14 as not worth it; the
+   platform-split files are the durable structure, so mind the `#cfg` drift
+   risk — inactive-platform code is not type-checked.)
 
 ## Unix
 
-3. `moonbit_pty_unix_write_error_exit` now carries `(void)n;` — verify
+2. `moonbit_pty_unix_write_error_exit` now carries `(void)n;` — verify
    `-Wall -Wextra -Wshadow` is clean on both clang/macOS and gcc/Ubuntu CI,
    then drop this item.
-4. Decide whether `execve` needs a retry for transient failures
+3. Decide whether `execve` needs a retry for transient failures
    (e.g. `ETXTBSY`). main's 8c91701 added spawn retries for the old
    helper-based architecture and was dropped in the rewrite rebase. The
    candidate loop already handles EACCES/ENOENT/ENOTDIR; ETXTBSY currently
@@ -31,7 +23,7 @@
 
 ## Windows
 
-7. Audit the win32 `spawn` failure branches for handle double-closes and port
+4. Audit the win32 `spawn` failure branches for handle double-closes and port
    the unix error-path tests (needs a Windows machine). Context: the unix side
    had a real one — `replica` was closed on the success path AND re-closed in
    the outer catch; the comment claiming "close is idempotent" was wrong
