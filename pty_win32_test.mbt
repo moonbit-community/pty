@@ -1,5 +1,15 @@
 ///|
 #cfg(platform="windows")
+async test "@pty.spawn (win32)" {
+  @async.with_task_group() <| g => {
+    let pty = @pty.spawn(g, "moon", ["version"], rows=24, cols=80)
+    assert_true(pty.read_all().text().contains("moon"))
+    assert_eq(pty.wait(), 0)
+  }
+}
+
+///|
+#cfg(platform="windows")
 async test "@pty.spawn can spawn file.exe using file" {
   async fn assert_pty_spawn(file : StringView) {
     @async.with_task_group() <| group => {

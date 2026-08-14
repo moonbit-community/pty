@@ -4,12 +4,92 @@
 // to be committed.
 
 ///|
+// Keeps the @async/fs test import used on Windows builds, where every
+// #cfg(not(platform="windows")) declaration in this file is compiled out.
+let _unused_package : Unit = ignore(@async/fs.opendir)
+
+///|
+#cfg(not(platform="windows"))
+async fn[T] with_tmpdir(prefix~ : StringView, f : async (String) -> T) -> T {
+  let tmpdir = @async/fs.tmpdir(prefix~)
+  async fn remove_tmpdir() {
+    @async.protect_from_cancel() <| () => {
+      @async/fs.rmdir(tmpdir, recursive=true) catch {
+        _ => ()
+      }
+    }
+  }
+  try f(tmpdir) catch {
+    error => {
+      remove_tmpdir()
+      raise error
+    }
+  } noraise {
+    value => {
+      remove_tmpdir()
+      value
+    }
+  }
+}
+
+///|
 #cfg(not(platform="windows"))
 const ENOENT : Int = 2
 
 ///|
 #cfg(not(platform="windows"))
 const EACCES : Int = 13
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.spawn" {
+  @async.with_task_group() <| g => {
+    // `file` is looked up in PATH and becomes `argv[0]`; `args` is `argv[1..]`.
+    let pty = @pty.spawn(g, "echo", ["hello"])
+    assert_eq(pty.read_all().text(), "hello\r\n")
+    assert_eq(pty.wait(), 0)
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.spawn passes file as argv[0]" {
+  @async.with_task_group() <| g => {
+    // `$0` in `sh -c` is the shell's own `argv[0]`, so this observes what the
+    // child was actually handed rather than what we asked for.
+    let pty = @pty.spawn(g, "sh", ["-c", "echo $0"])
+    assert_eq(pty.read_all().text(), "sh\r\n")
+    assert_eq(pty.wait(), 0)
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.spawn resolves an absolute file without searching PATH" {
+  @async.with_task_group() <| g => {
+    let pty = @pty.spawn(g, "/bin/sh", ["-c", "echo $0"])
+    assert_eq(pty.read_all().text(), "/bin/sh\r\n")
+    assert_eq(pty.wait(), 0)
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.spawn(cwd~)" {
+  @async.with_task_group() <| group => {
+    with_tmpdir(prefix="moonbit-pty-spawn-cwd") <| tmpdir => {
+      let pty = @pty.spawn(
+        group,
+        "/bin/sh",
+        ["-c", "pwd"],
+        rows=24,
+        cols=80,
+        cwd=tmpdir,
+      )
+      assert_true(pty.read_all().text().contains(tmpdir))
+    }
+  }
+}
 
 ///|
 #cfg(not(platform="windows"))
@@ -27,23 +107,6 @@ async test "@pty.spawn resolves a relative file against cwd" {
       assert_eq(pty.wait(), 0)
     }
   }
-}
-
-///|
-#cfg(not(platform="windows"))
-async test "@pty.spawn cancellation kills a running program" {
-  // `spawn` returns within a few milliseconds, so the 200ms timer reliably
-  // fires while the child is still running and the group is blocked on its
-  // wait task. The test finishing at all is the real assertion: cancellation
-  // must kill the child, or the group would wait on it for 3600 seconds.
-  assert_eq(
-    @async.with_timeout_opt(200) <| () => {
-      @async.with_task_group() <| group => {
-        @pty.spawn(group, "sleep", ["3600"]) |> ignore()
-      }
-    },
-    None,
-  )
 }
 
 ///|
@@ -78,4 +141,21 @@ async test "@pty.spawn raises EACCES for a file without execute permission" {
       }
     }
   }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.spawn cancellation kills a running program" {
+  // `spawn` returns within a few milliseconds, so the 200ms timer reliably
+  // fires while the child is still running and the group is blocked on its
+  // wait task. The test finishing at all is the real assertion: cancellation
+  // must kill the child, or the group would wait on it for 3600 seconds.
+  assert_eq(
+    @async.with_timeout_opt(200) <| () => {
+      @async.with_task_group() <| group => {
+        @pty.spawn(group, "sleep", ["3600"]) |> ignore()
+      }
+    },
+    None,
+  )
 }
