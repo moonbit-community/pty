@@ -1,21 +1,22 @@
 import {
+  "moonbitlang/core/encoding/utf8" @encoding/utf8,
+  "moonbitlang/core/env",
   "moonbitlang/async",
-  "moonbitlang/core/encoding/utf8",
-  "moonbitlang/async/pipe",
-  "moonbitlang/async/process",
-  "moonbitlang/async/raw_fd",
-  "moonbitlang/async/io",
-  "moonbitlang/async/types",
+  "moonbitlang/async/io" @async/io,
+  "moonbitlang/async/raw_fd" @async/raw_fd,
+  "moonbitlang/async/process" @async/process,
   "moonbitlang/async/os_error",
+  "moonbitlang/core/test",
+  "moonbit-community/pty/internal/handle",
 }
 
 import {
-  "moonbitlang/async/fs",
+  "moonbitlang/async/fs" @async/fs,
+  "moonbitlang/core/test",
 } for "test"
 
 supported_targets = "native"
 
 options(
   "native-stub": [ "pty.c" ],
-  targets: { "ffi.mbt": [ "native" ], "pty_test.mbt": [ "native" ] },
 )

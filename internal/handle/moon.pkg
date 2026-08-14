@@ -1,0 +1,6 @@
+import {
+  "moonbitlang/async/types" @async/types,
+  "moonbitlang/async/raw_fd" @async/raw_fd,
+}
+
+supported_targets = "native"
