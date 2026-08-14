@@ -20,6 +20,27 @@ const ERROR_EXE_MACHINE_TYPE_MISMATCH : Int = 216
 const EBADF : Int = 9
 
 ///|
+// The win32 analog of the unix "generate fixtures at test time" policy:
+// instead of committing a compiled binary, copy the system cmd.exe
+// (%ComSpec%) to `target`. Spawned with ["/c", "echo", text] it produces
+// observable output regardless of the name it runs under. No cleanup of its
+// own — `target` is expected to live in a `with_tmpdir` directory.
+#cfg(platform="windows")
+async fn with_comspec_copied(target : StringView, f : async () -> Unit) -> Unit {
+  // `get_env_var` is `GetEnvironmentVariableW` on win32, which looks keys up
+  // ordinal-ignore-case itself.
+  let comspec = @env.get_env_var("ComSpec").unwrap_or(
+    "C:\\Windows\\System32\\cmd.exe",
+  )
+  @async/fs.write_file(
+    target,
+    @async/fs.read_file(comspec),
+    create_mode=CreateNew,
+  )
+  f()
+}
+
+///|
 #cfg(platform="windows")
 async test "@pty.spawn (win32)" {
   @async.with_task_group() <| g => {
@@ -32,41 +53,43 @@ async test "@pty.spawn (win32)" {
 ///|
 #cfg(platform="windows")
 async test "@pty.spawn can spawn file.exe using file" {
-  async fn assert_pty_spawn(file : StringView) {
-    @async.with_task_group() <| group => {
-      let text = "Hello, world!"
-      let pty = @pty.spawn(group, rows=24, cols=80, file) <| [
-        text,
-      ]
-      assert_true(pty.read_all().text().contains(text))
-      assert_eq(pty.wait(), 0)
+  with_tmpdir(prefix="moonbit-pty-fixture") <| tmpdir => {
+    with_comspec_copied("\{tmpdir}\\echo.exe") <| () => {
+      async fn assert_pty_spawn(file : StringView) {
+        @async.with_task_group() <| group => {
+          let text = "Hello, world!"
+          let pty = @pty.spawn(group, rows=24, cols=80, file) <| [
+            "/c", "echo", text,
+          ]
+          assert_true(pty.read_all().text().contains(text))
+          assert_eq(pty.wait(), 0)
+        }
+      }
+      assert_pty_spawn("\{tmpdir}\\echo")
+      assert_pty_spawn("\{tmpdir}\\echo.exe")
     }
   }
-  assert_pty_spawn("test_data\\win32\\echo")
-  assert_pty_spawn("test_data\\win32\\echo.exe")
 }
 
 ///|
 #cfg(platform="windows")
 async test "@pty.spawn can spawn file.exe using cwd" {
-  async fn assert_pty_spawn(file : StringView) {
-    @async.with_task_group() <| group => {
-      let text = "Hello, world!"
-      let pty = @pty.spawn(
-        group,
-        rows=24,
-        cols=80,
-        file,
-        cwd="test_data\\win32",
-      ) <| [
-        text,
-      ]
-      assert_true(pty.read_all().text().contains(text))
-      assert_eq(pty.wait(), 0)
+  with_tmpdir(prefix="moonbit-pty-fixture") <| tmpdir => {
+    with_comspec_copied("\{tmpdir}\\echo.exe") <| () => {
+      async fn assert_pty_spawn(file : StringView) {
+        @async.with_task_group() <| group => {
+          let text = "Hello, world!"
+          let pty = @pty.spawn(group, rows=24, cols=80, file, cwd=tmpdir) <| [
+            "/c", "echo", text,
+          ]
+          assert_true(pty.read_all().text().contains(text))
+          assert_eq(pty.wait(), 0)
+        }
+      }
+      assert_pty_spawn(".\\echo")
+      assert_pty_spawn(".\\echo.exe")
     }
   }
-  assert_pty_spawn(".\\echo")
-  assert_pty_spawn(".\\echo.exe")
 }
 
 ///|
@@ -79,7 +102,10 @@ async test "@pty.spawn raises ERROR_FILE_NOT_FOUND for a non-existent program" {
       @os_error.OSError(ERROR_FILE_NOT_FOUND, ..) => ()
       error => raise error
     } noraise {
-      _ => fail("expected spawn of a non-existent program to raise ERROR_FILE_NOT_FOUND")
+      _ =>
+        fail(
+          "expected spawn of a non-existent program to raise ERROR_FILE_NOT_FOUND",
+        )
     }
   }
 }
@@ -104,9 +130,12 @@ async test "@pty.spawn raises ERROR_BAD_EXE_FORMAT for a non-executable .exe" {
         | @os_error.OSError(ERROR_EXE_MACHINE_TYPE_MISMATCH, ..) => ()
         error => raise error
       } noraise {
-        _ => fail("expected spawn of a non-executable .exe to raise ERROR_BAD_EXE_FORMAT")
+        _ =>
+          fail(
+            "expected spawn of a non-executable .exe to raise ERROR_BAD_EXE_FORMAT",
+          )
       }
-      let pty = @pty.spawn(group, "test_data\\win32\\echo", ["still works"])
+      let pty = @pty.spawn(group, "cmd", ["/c", "echo", "still works"])
       assert_true(pty.read_all().text().contains("still works"))
       assert_eq(pty.wait(), 0)
     }
@@ -118,7 +147,7 @@ async test "@pty.spawn raises ERROR_BAD_EXE_FORMAT for a non-executable .exe" {
 async test "@pty.Pty::resize raises EBADF after the group closed the pty" {
   let mut pty : @pty.Pty? = None
   @async.with_task_group() <| group => {
-    pty = Some(@pty.spawn(group, "test_data\\win32\\echo", ["bye"]))
+    pty = Some(@pty.spawn(group, "cmd", ["/c", "echo", "bye"]))
   }
   guard pty is Some(pty) else { fail("pty was not spawned") }
   try pty.resize(rows=10, cols=10) catch {
