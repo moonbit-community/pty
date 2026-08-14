@@ -2,13 +2,41 @@
 
 ## Unix
 
-1. Decide whether `execve` needs a retry for transient failures
-   (e.g. `ETXTBSY`). main's 8c91701 added spawn retries for the old
-   helper-based architecture and was dropped in the rewrite rebase. The
-   candidate loop already handles EACCES/ENOENT/ENOTDIR; ETXTBSY currently
-   fails immediately. Data point: Go's model (parent-side resolve + a single
-   `execve`) does not retry either, and neither does our win32 side — deciding
-   "no retry" would make all three consistent.
+1. **ETXTBSY on Linux CI — merge blocker; reproduce on a Linux box, then
+   decide the fix there.** PR #18's ubuntu job fails (run 31773488278):
+   `@pty.spawn resolves a relative file against cwd` gets
+   `OSError("@pty.spawn: Text file busy")` — the test writes `echo.sh` via
+   `@async/fs.write_file` and spawns it immediately. macOS never hits this.
+
+   What we know so far (2026-08-14):
+   - The candidate loop treats ETXTBSY as fatal (only EACCES/ENOENT/ENOTDIR
+     continue); main's 8c91701 had spawn retries and the rewrite dropped them.
+   - Suspected mechanism: the same "racing with itself" shape as
+     rust-lang/rust#114554 — a window between `write_file`'s fd being
+     physically closed and our fork, so the child's execve still sees the
+     file open for writing. moonbitlang/async's Linux backend is epoll +
+     worker thread pool (no io_uring — an earlier io_uring/delayed-fput
+     theory was wrong). NOT confirmed; verify on Linux. Useful probes:
+     `moon test` in a loop for flake rate; `strace -f` around the failing
+     spawn; read async's `IoHandle::close` on Linux to see whether close(2)
+     is deferred past `File::close` returning.
+   - Prior art is split by layer, not by project. Go's os/exec does NOT
+     auto-retry (golang/go#22315, still open: a general spawn library cannot
+     tell a transient pre-exec-window fd from a file legitimately held open
+     for writing). But cmd/go — the caller that KNOWS it just wrote the
+     binary — retries in an unbounded no-backoff loop (golang/go#62221,
+     landed 1.22, backported 1.21): "we know that they should resolve
+     quickly (the ETXTBSY error will resolve as soon as the subprocess
+     holding the descriptor open reaches its 'exec' call), we retry them in
+     a loop." Rust (#114554) and .NET (dotnet/runtime#58964) also have no
+     library-level retry.
+   - Options: (a) os/exec-style — keep single execve, retry in the test
+     that writes-then-spawns; (b) cmd/go-style but bounded, in the C
+     candidate loop (e.g. 20 × 50ms nanosleep on ETXTBSY). Claude leans
+     (b): pty users commonly write-a-script-then-spawn, the async runtime
+     itself may manufacture the window (so callers can't avoid it with fd
+     discipline), and win32 has no ETXTBSY so symmetry is unaffected.
+     Decide after reproducing.
 
 ## Windows ConPTY — do not regress
 
