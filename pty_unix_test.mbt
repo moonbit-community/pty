@@ -4,12 +4,7 @@
 // to be committed.
 
 ///|
-// Keeps the @async/fs test import used on Windows builds, where every
-// #cfg(not(platform="windows")) declaration in this file is compiled out.
-let _unused_package : Unit = ignore(@async/fs.opendir)
-
-///|
-#cfg(not(platform="windows"))
+// Shared with the win32 tests (same blackbox test package), so no #cfg.
 async fn[T] with_tmpdir(prefix~ : StringView, f : async (String) -> T) -> T {
   let tmpdir = @async/fs.tmpdir(prefix~)
   async fn remove_tmpdir() {
