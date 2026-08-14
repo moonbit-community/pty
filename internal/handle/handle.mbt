@@ -20,6 +20,23 @@ pub fn Handle::close(self : Handle) -> Unit {
 }
 
 ///|
-pub async fn Handle::to_raw_fd_stream(self : Handle) -> @async/raw_fd.RawFdStream {
+pub async fn Handle::to_raw_fd_stream(
+  self : Handle,
+) -> @async/raw_fd.RawFdStream {
   @async/raw_fd.RawFdStream(self.0)
+}
+
+///|
+/// The conventional invalid value on both platforms (-1 is also
+/// INVALID_HANDLE_VALUE on win32); used as the placeholder in out-parameter
+/// arrays the C side fills in.
+pub fn Handle::invalid() -> Handle {
+  Handle(-1)
+}
+
+///|
+pub fn borrow_raw_fd_stream(
+  raw_fd_stream : @async/raw_fd.RawFdStream,
+) -> Handle {
+  Handle(raw_fd_stream.fd)
 }

@@ -18,7 +18,7 @@ extern "c" fn pty_unix_open(
 
 ///|
 #cfg(not(platform="windows"))
-#borrow(pty, path, argv, envp, cwd)
+#borrow(pty, efd, path, argv, envp, cwd)
 extern "c" fn pty_unix_spawn(
   pty : FixedArray[@handle.Handle],
   efd : @handle.Handle,
@@ -51,7 +51,10 @@ pub async fn[X] spawn(
   inherit_env? : Bool = true,
   cwd? : StringView,
 ) -> Pty {
-  let pty : FixedArray[@handle.Handle] = [0, 0]
+  let pty : FixedArray[@handle.Handle] = [
+    @handle.Handle::invalid(),
+    @handle.Handle::invalid(),
+  ]
   if pty_unix_open(pty, rows~, cols~) < 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
   }
@@ -69,7 +72,7 @@ pub async fn[X] spawn(
     }
   }
 
-  let primary = @async/raw_fd.RawFdStream::RawFdStream(primary_handle.0) catch {
+  let primary = primary_handle.to_raw_fd_stream() catch {
     error => {
       close_replica()
       raise error
@@ -112,12 +115,15 @@ pub async fn[X] spawn(
     // pool, NOT an async pipe: async pipes are registered with kqueue as
     // edge-triggered, and on macOS a pipe knote armed across a fork() can
     // lose its final EOF edge, hanging `read_all` below forever.
-    let efds : FixedArray[@handle.Handle] = [0, 0]
+    let efds : FixedArray[@handle.Handle] = [
+      @handle.Handle::invalid(),
+      @handle.Handle::invalid(),
+    ]
     if pty_unix_create_error_pipe(efds) < 0 {
       raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
     }
     let error_writer = efds[1]
-    let error_reader = @async/raw_fd.RawFdStream::RawFdStream(efds[0].0) catch {
+    let error_reader = efds[0].to_raw_fd_stream() catch {
       error => {
         error_writer.close()
         raise error
@@ -241,6 +247,7 @@ pub impl @async/io.Writer for Pty with fn write_once(
 
 ///|
 #cfg(not(platform="windows"))
+#borrow(primary)
 extern "c" fn pty_resize(
   primary : @handle.Handle,
   rows~ : Int,
@@ -261,7 +268,7 @@ pub fn Pty::resize(
   if self.closed.val {
     raise @os_error.OSError(EBADF, context="@pty.Pty::resize")
   }
-  if pty_resize(self.primary.fd, rows~, cols~) != 0 {
+  if pty_resize(@handle.borrow_raw_fd_stream(self.primary), rows~, cols~) != 0 {
     raise @os_error.OSError(@os_error.get_errno(), context="@pty.Pty::resize")
   }
 }

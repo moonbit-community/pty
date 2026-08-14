@@ -6,12 +6,14 @@ import {
 }
 
 // Values
+pub fn borrow_raw_fd_stream(@raw_fd.RawFdStream) -> Handle
 
 // Errors
 
 // Types and methods
 type Handle
 pub fn Handle::close(Self) -> Unit
+pub fn Handle::invalid() -> Self
 pub async fn Handle::to_raw_fd_stream(Self) -> @raw_fd.RawFdStream
 pub impl Eq for Handle
 
