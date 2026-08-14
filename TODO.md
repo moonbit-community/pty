@@ -1,5 +1,16 @@
 # TODO
 
+## Toolchain
+
+1. Migrate the Reader/Writer impls off implicit method promotion. Nightly
+   moonc (v0.10.7+205e472ff, 2026-08-14) warns `implicit_impl_as_method` on
+   them and materializes the promoted methods into `pkg.generated.mbti`;
+   CI's stable moon still emits the old format, so do NOT commit
+   nightly-regenerated `.mbti` files — CI's "Verify generated interfaces"
+   step would fail. When stable picks the change up: add the suggested
+   `pub extend Pty with ...::{...}` declarations (both platform files, plus
+   `Handle`'s `Eq`) and regenerate the `.mbti` files in the same commit.
+
 ## Unix — do not regress
 
 - `execve` retries ETXTBSY (bounded: 20 × 50ms, plus a final attempt) in

@@ -93,6 +93,27 @@ async test "@pty.spawn can spawn file.exe using cwd" {
 }
 
 ///|
+// Unicode in `cwd` and in the resolved executable path exercises the
+// UTF-16 conversions behind GetFullPathNameW / the file-exists probe /
+// CreateProcessW's lpApplicationName. The echoed text stays ASCII so the
+// assertion is independent of cmd.exe's output codepage.
+#cfg(platform="windows")
+async test "@pty.spawn handles unicode paths (win32)" {
+  @async.with_task_group() <| group => {
+    with_tmpdir(prefix="moonbit-pty-unicode") <| tmpdir => {
+      let cwd = "\{tmpdir}\\路径"
+      @async/fs.mkdir(cwd)
+      with_comspec_copied("\{cwd}\\回声.exe") <| () => {
+        let text = "UNICODE_CWD_OK"
+        let pty = @pty.spawn(group, ".\\回声", ["/c", "echo", text], cwd~)
+        assert_true(pty.read_all().text().contains(text))
+        assert_eq(pty.wait(), 0)
+      }
+    }
+  }
+}
+
+///|
 // The userland resolver raises before any handle exists, so this exercises
 // the no-cleanup failure path.
 #cfg(platform="windows")

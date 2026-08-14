@@ -110,6 +110,31 @@ async test "@pty.spawn resolves a relative file against cwd" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "@pty.spawn handles unicode paths and argv" {
+  @async.with_task_group() <| group => {
+    with_tmpdir(prefix="moonbit-pty-unicode") <| tmpdir => {
+      // Unicode exercises the UTF-8 encoding of all three spawn inputs at
+      // once: `cwd` (chdir), the resolved file (execve), and argv (echoed
+      // back through the pty and decoded by `.text()`). CJK on purpose —
+      // unaffected by macOS's NFD filename normalization, so the bytes
+      // written are the bytes execve sees on every platform.
+      let cwd = "\{tmpdir}/路径"
+      @async/fs.mkdir(cwd)
+      @async/fs.write_file(
+        "\{cwd}/回声.sh",
+        b"#!/bin/sh\necho \"$@\"\n",
+        create_mode=CreateNew,
+        permission=0o755,
+      )
+      let pty = @pty.spawn(group, "./回声.sh", ["你好"], cwd~)
+      assert_eq(pty.read_all().text(), "你好\r\n")
+      assert_eq(pty.wait(), 0)
+    }
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "@pty.spawn raises ENOENT for a non-existent program" {
   @async.with_task_group() <| group => {
     try @pty.spawn(group, "./non-existent", []) catch {
