@@ -16,7 +16,9 @@ rather than each platform's ambient default:
   missing `PATH` means a bare name is simply not found.
 
 A `file` that cannot be resolved raises before any process or ConPTY is
-created.
+created. Failures throughout the library are the usual
+`@moonbitlang/async/os_error.OSError(code, context~)`, with `code` taken
+from `errno` on unix and `GetLastError()` on Windows.
 
 ### Windows drive-letter forms
 

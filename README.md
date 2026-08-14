@@ -39,24 +39,6 @@ output. Strip or escape them before asserting on pty output in tests — a
 failing diff that prints raw pty output replays those sequences into your
 terminal.
 
-## Errors
-
-Failures are reported as `@moonbitlang/async/os_error.OSError(code, context~)`,
-where `code` is `errno` on unix or `GetLastError()` on Windows. A `file` that
-cannot be resolved raises before any process or ConPTY is created. Use the
-`@os_error` predicates to branch on specific kinds:
-
-```moonbit
-try {
-  @async.with_task_group(group => {
-    @pty.spawn(group, "missing-program", [])
-  })
-} catch {
-  err is @os_error.OSError if err.is_ENOENT() => ...
-  err => raise err
-}
-```
-
 ## Further reading
 
 - [docs/internals.md](docs/internals.md) — executable resolution, environment
