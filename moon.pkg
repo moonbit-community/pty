@@ -12,6 +12,7 @@ import {
 
 import {
   "moonbitlang/async/fs" @async/fs,
+  "moonbitlang/core/test",
 } for "test"
 
 supported_targets = "native"

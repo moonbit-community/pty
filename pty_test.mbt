@@ -40,7 +40,7 @@ async fn[T] with_tmpdir(prefix~ : StringView, f : async (String) -> T) -> T {
   let tmpdir = @async/fs.tmpdir(prefix~)
   async fn remove_tmpdir() {
     @async.protect_from_cancel() <| () => {
-      @async/fs.rmdir(tmpdir) catch {
+      @async/fs.rmdir(tmpdir, recursive=true) catch {
         _ => ()
       }
     }
