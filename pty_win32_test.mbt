@@ -93,6 +93,15 @@ async test "@pty.spawn can spawn file.exe using cwd" {
 }
 
 ///|
+#cfg(platform="windows")
+async test "@pty.Pty::wait returns the child's exit code (win32)" {
+  @async.with_task_group() <| group => {
+    let pty = @pty.spawn(group, "cmd", ["/c", "exit", "7"])
+    assert_eq(pty.wait(), 7)
+  }
+}
+
+///|
 // Unicode in `cwd` and in the resolved executable path exercises the
 // UTF-16 conversions behind GetFullPathNameW / the file-exists probe /
 // CreateProcessW's lpApplicationName. The echoed text stays ASCII so the

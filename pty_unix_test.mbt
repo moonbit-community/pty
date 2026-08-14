@@ -52,6 +52,15 @@ async test "@pty.spawn" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "@pty.Pty::wait returns the child's exit code" {
+  @async.with_task_group() <| group => {
+    let pty = @pty.spawn(group, "sh", ["-c", "exit 7"])
+    assert_eq(pty.wait(), 7)
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "@pty.spawn passes file as argv[0]" {
   @async.with_task_group() <| g => {
     // `$0` in `sh -c` is the shell's own `argv[0]`, so this observes what the
@@ -204,6 +213,22 @@ async test "@pty.Pty::resize raises EBADF after the group closed the pty" {
     error => raise error
   } noraise {
     _ => fail("expected resize on a closed pty to raise EBADF")
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "idle pty read waits instead of reporting EOF" {
+  @async.with_task_group() <| group => {
+    // `cat` is alive but silent: a read must suspend until data arrives,
+    // never surface a spurious EOF — the `EIO => 0` mapping in
+    // `_direct_read` sits right next to this behavior, and every consumer's
+    // core loop is `while read() > 0`.
+    let pty = @pty.spawn(group, "cat", [])
+    assert_eq(@async.with_timeout_opt(100, () => pty.read_some()), None)
+    // ^D at line start: canonical mode delivers EOF, cat exits on its own.
+    pty.write(b"\x04")
+    assert_eq(pty.wait(), 0)
   }
 }
 
