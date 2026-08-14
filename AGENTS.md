@@ -24,6 +24,12 @@ You can browse and install extra skills here:
 - Try to keep deprecated blocks in file called `deprecated.mbt` in each
   directory.
 
+- This project splits platform code with `#cfg(platform=...)` blocks across
+  per-platform files. Inactive-platform code is NOT type-checked, so an edit
+  that renames or reshapes a shared helper compiles cleanly while silently
+  breaking the other platform — when touching anything used by both sides,
+  check the sibling `pty_unix*` / `pty_win32*` files by hand.
+
 ## Tooling
 
 - `moon fmt` is used to format your code properly.
