@@ -220,20 +220,6 @@ pub impl @async/io.Reader for Pty with fn _get_internal_buffer(self : Pty) -> @a
 }
 
 ///|
-pub extend Pty with @async/io.Reader::{
-  read,
-  read_some,
-  drop,
-  read_all,
-  read_until,
-  read_exactly,
-}
-
-///|
-#deprecated("internal")
-pub extend Pty with @async/io.Reader::{_direct_read, _get_internal_buffer}
-
-///|
 #cfg(not(platform="windows"))
 const EIO : Int = 5
 
@@ -261,9 +247,6 @@ pub impl @async/io.Writer for Pty with fn write_once(
 ) -> Int {
   self.primary.write_once(buf, offset~, len~)
 }
-
-///|
-pub extend Pty with @async/io.Writer::{write_once, write, write_reader}
 
 ///|
 #cfg(not(platform="windows"))
