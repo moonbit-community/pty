@@ -14,17 +14,8 @@ async fn[T] with_tmpdir(prefix~ : StringView, f : async (String) -> T) -> T {
       }
     }
   }
-  try f(tmpdir) catch {
-    error => {
-      remove_tmpdir()
-      raise error
-    }
-  } noraise {
-    value => {
-      remove_tmpdir()
-      value
-    }
-  }
+  defer remove_tmpdir()
+  f(tmpdir)
 }
 
 ///|

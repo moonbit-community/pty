@@ -116,19 +116,19 @@ pub async fn[X] spawn(
   }
   guard! pty is [input_writer_handle, output_reader_handle, hpc_handle]
   let hpc = PseudoConsole(hpc_handle)
-  let input_writer = input_writer_handle.to_raw_fd_stream() catch {
-    error => {
+  let input_writer = {
+    errdefer {
       output_reader_handle.close()
       hpc.close()
-      raise error
     }
+    input_writer_handle.to_raw_fd_stream()
   }
-  let output_reader = output_reader_handle.to_raw_fd_stream() catch {
-    error => {
+  let output_reader = {
+    errdefer {
       input_writer.close()
       hpc.close()
-      raise error
     }
+    output_reader_handle.to_raw_fd_stream()
   }
   let session : FixedArray[@handle.Handle] = [invalid_handle, invalid_handle]
   let pid = pty_win32_spawn(hpc, session, cmd~, app~, env~, cwd~)
@@ -153,24 +153,25 @@ pub async fn[X] spawn(
     defer process.close()
     defer close_pseudo_console()
     @async/process.wait_pid(pid) catch {
-      _ if @async.is_being_cancelled() =>
-        @async.protect_from_cancel() <| () => {
-          @async.with_task_group() <| g => {
-            g.spawn_bg(no_wait=true) <| () => {
-              close_pseudo_console()
-              // Grace period before the hard kill; matches the ~5s the OS
-              // itself grants on CTRL_CLOSE_EVENT. Keep in sync with the
-              // unix side (pty_unix.mbt), which is not type-checked here.
-              @async.sleep(5000)
-              if !job.is_invalid() {
-                job.terminate(1) |> ignore()
-              } else {
-                process.terminate(1) |> ignore()
-              }
+      error if @async.is_being_cancelled() => {
+        // Reap the child even though we are being cancelled, then propagate
+        // the cancellation like `@async/process.spawn` does.
+        let _ = @async.protect_from_cancel() <| () => {
+          wait_pid_with(pid) <| () => {
+            close_pseudo_console()
+            // Grace period before the hard kill; matches the ~5s the OS
+            // itself grants on CTRL_CLOSE_EVENT. Keep in sync with the
+            // unix side (pty_unix.mbt), which is not type-checked here.
+            @async.sleep(5000)
+            if !job.is_invalid() {
+              job.terminate(1) |> ignore()
+            } else {
+              process.terminate(1) |> ignore()
             }
-            @async/process.wait_pid(pid)
           }
         }
+        raise error
+      }
       error => raise error
     }
   }

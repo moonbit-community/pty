@@ -73,11 +73,9 @@ pub async fn[X] spawn(
     }
   }
 
-  let primary = primary_handle.to_raw_fd_stream() catch {
-    error => {
-      close_replica()
-      raise error
-    }
+  let primary = {
+    errdefer close_replica()
+    primary_handle.to_raw_fd_stream()
   }
   let env = if inherit_env { @env.get_env_vars() } else { Map([]) }
   for k, v in extra_env {
@@ -109,9 +107,13 @@ pub async fn[X] spawn(
   // The pty is owned by this function until a `Pty` exists to hang the group
   // defer off, so every failure below has to close both ends itself. The
   // replica is closed early on the success path, before the error-pipe read
-  // can raise into the catch handler — `close_replica` keeps that from
-  // becoming a double close.
-  let pid = try {
+  // can fail into the `errdefer` — `close_replica` keeps that from becoming a
+  // double close.
+  let pid = {
+    errdefer {
+      primary.close()
+      close_replica()
+    }
     // The error pipe is a plain blocking pipe read through the worker thread
     // pool, NOT an async pipe: async pipes are registered with kqueue as
     // edge-triggered, and on macOS a pipe knote armed across a fork() can
@@ -124,11 +126,9 @@ pub async fn[X] spawn(
       raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
     }
     let error_writer = efds[1]
-    let error_reader = efds[0].to_raw_fd_stream() catch {
-      error => {
-        error_writer.close()
-        raise error
-      }
+    let error_reader = {
+      errdefer error_writer.close()
+      efds[0].to_raw_fd_stream()
     }
     let pid = pty_unix_spawn(pty, error_writer, path, argv, envp, cwd)
     if pid < 0 {
@@ -140,19 +140,20 @@ pub async fn[X] spawn(
     error_writer.close()
     close_replica()
     defer error_reader.close()
-    try error_reader.read_all().binary() catch {
-      error => {
+    let report = {
+      errdefer {
         pty_unix_kill_group(pid) |> ignore()
         @async.protect_from_cancel() <| () => {
+          // The child was just SIGKILLed; no background work, the timeout is
+          // only a safety net against a reap that never completes.
           ignore(
-            @async.with_timeout_opt(1000, () => {
-              @async/process.wait_pid(pid) |> ignore()
-            }),
+            @async.with_timeout_opt(1000, () => wait_pid_with(pid, () => ())),
           )
         }
-        raise error
       }
-    } noraise {
+      error_reader.read_all().binary()
+    }
+    match report {
       [i32le(errno)] => {
         @async/process.wait_pid(pid) |> ignore()
         raise @os_error.OSError(errno, context="@pty.spawn")
@@ -164,12 +165,6 @@ pub async fn[X] spawn(
       }
     }
     pid
-  } catch {
-    error => {
-      primary.close()
-      close_replica()
-      raise error
-    }
   }
   let closed = Ref(false)
   fn close_primary() {
@@ -180,19 +175,20 @@ pub async fn[X] spawn(
   }
   let result = group.spawn(no_wait?) <| () => {
     @async/process.wait_pid(pid) catch {
-      _ if @async.is_being_cancelled() =>
-        @async.protect_from_cancel() <| () => {
-          @async.with_task_group() <| g => {
-            g.spawn_bg(no_wait=true) <| () => {
-              close_primary()
-              // Grace period before the hard kill; keep in sync with the
-              // win32 side (pty_win32.mbt), which is not type-checked here.
-              @async.sleep(5000)
-              pty_unix_kill_group(pid) |> ignore()
-            }
-            @async/process.wait_pid(pid)
+      error if @async.is_being_cancelled() => {
+        // Reap the child even though we are being cancelled, then propagate
+        // the cancellation like `@async/process.spawn` does.
+        let _ = @async.protect_from_cancel() <| () => {
+          wait_pid_with(pid) <| () => {
+            close_primary()
+            // Grace period before the hard kill; keep in sync with the
+            // win32 side (pty_win32.mbt), which is not type-checked here.
+            @async.sleep(5000)
+            pty_unix_kill_group(pid) |> ignore()
           }
         }
+        raise error
+      }
       error => raise error
     }
   }
