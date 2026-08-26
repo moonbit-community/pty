@@ -144,10 +144,10 @@ pub async fn[X] spawn(
       error => {
         pty_unix_kill_group(pid) |> ignore()
         @async.protect_from_cancel() <| () => {
+          // The child was just SIGKILLed; no background work, the timeout is
+          // only a safety net against a reap that never completes.
           ignore(
-            @async.with_timeout_opt(1000, () => {
-              @async/process.wait_pid(pid) |> ignore()
-            }),
+            @async.with_timeout_opt(1000, () => wait_pid_with(pid, () => ())),
           )
         }
         raise error
@@ -180,19 +180,20 @@ pub async fn[X] spawn(
   }
   let result = group.spawn(no_wait?) <| () => {
     @async/process.wait_pid(pid) catch {
-      _ if @async.is_being_cancelled() =>
-        @async.protect_from_cancel() <| () => {
-          @async.with_task_group() <| g => {
-            g.spawn_bg(no_wait=true) <| () => {
-              close_primary()
-              // Grace period before the hard kill; keep in sync with the
-              // win32 side (pty_win32.mbt), which is not type-checked here.
-              @async.sleep(5000)
-              pty_unix_kill_group(pid) |> ignore()
-            }
-            @async/process.wait_pid(pid)
+      error if @async.is_being_cancelled() => {
+        // Reap the child even though we are being cancelled, then propagate
+        // the cancellation like `@async/process.spawn` does.
+        let _ = @async.protect_from_cancel() <| () => {
+          wait_pid_with(pid) <| () => {
+            close_primary()
+            // Grace period before the hard kill; keep in sync with the
+            // win32 side (pty_win32.mbt), which is not type-checked here.
+            @async.sleep(5000)
+            pty_unix_kill_group(pid) |> ignore()
           }
         }
+        raise error
+      }
       error => raise error
     }
   }

@@ -12,6 +12,19 @@ rationale. Nothing here is pending work; it is documented so it doesn't get
   `pty_unix.mbt` and `pty_win32.mbt`; `#cfg` means the inactive platform is
   not type-checked, so a change to one side cannot be caught by the compiler
   on the other — keep them in sync by hand.
+- In the cancellation cleanup the `wait_pid` waiter is a spawned task
+  (`wait_pid_with` in `pty.mbt`), never the main task of a `with_task_group`,
+  and the cleanup re-raises `Cancelled` afterwards, like
+  `@async/process.spawn` (decided 2026-08-26). Reason: moonbitlang/async's
+  `with_task_group` aborts the process (`result.unwrap()` on a `Done` group
+  with no result, `task_group.mbt:268` as of 0.21.0) when its main task is
+  cancelled directly by the runtime, which `EventLoop::cleanup` does to every
+  fd/pid waiter after a fatal error in the host event loop. With the waiter as
+  a child task the group fails with `Cancelled` instead. `pty_wbtest.mbt`
+  guards this by cancelling the waiter through the `on_waiter` hook; the
+  end-to-end reproduction (a fake `ExternalEventLoop` whose `poll` raises
+  while the cleanup group is alive) is not in the repo. Do not fold the
+  waiter back into the main task.
 
 ## Unix
 

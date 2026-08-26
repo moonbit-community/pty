@@ -153,24 +153,25 @@ pub async fn[X] spawn(
     defer process.close()
     defer close_pseudo_console()
     @async/process.wait_pid(pid) catch {
-      _ if @async.is_being_cancelled() =>
-        @async.protect_from_cancel() <| () => {
-          @async.with_task_group() <| g => {
-            g.spawn_bg(no_wait=true) <| () => {
-              close_pseudo_console()
-              // Grace period before the hard kill; matches the ~5s the OS
-              // itself grants on CTRL_CLOSE_EVENT. Keep in sync with the
-              // unix side (pty_unix.mbt), which is not type-checked here.
-              @async.sleep(5000)
-              if !job.is_invalid() {
-                job.terminate(1) |> ignore()
-              } else {
-                process.terminate(1) |> ignore()
-              }
+      error if @async.is_being_cancelled() => {
+        // Reap the child even though we are being cancelled, then propagate
+        // the cancellation like `@async/process.spawn` does.
+        let _ = @async.protect_from_cancel() <| () => {
+          wait_pid_with(pid) <| () => {
+            close_pseudo_console()
+            // Grace period before the hard kill; matches the ~5s the OS
+            // itself grants on CTRL_CLOSE_EVENT. Keep in sync with the
+            // unix side (pty_unix.mbt), which is not type-checked here.
+            @async.sleep(5000)
+            if !job.is_invalid() {
+              job.terminate(1) |> ignore()
+            } else {
+              process.terminate(1) |> ignore()
             }
-            @async/process.wait_pid(pid)
           }
         }
+        raise error
+      }
       error => raise error
     }
   }
