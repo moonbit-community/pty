@@ -116,19 +116,19 @@ pub async fn[X] spawn(
   }
   guard! pty is [input_writer_handle, output_reader_handle, hpc_handle]
   let hpc = PseudoConsole(hpc_handle)
-  let input_writer = input_writer_handle.to_raw_fd_stream() catch {
-    error => {
+  let input_writer = {
+    errdefer {
       output_reader_handle.close()
       hpc.close()
-      raise error
     }
+    input_writer_handle.to_raw_fd_stream()
   }
-  let output_reader = output_reader_handle.to_raw_fd_stream() catch {
-    error => {
+  let output_reader = {
+    errdefer {
       input_writer.close()
       hpc.close()
-      raise error
     }
+    output_reader_handle.to_raw_fd_stream()
   }
   let session : FixedArray[@handle.Handle] = [invalid_handle, invalid_handle]
   let pid = pty_win32_spawn(hpc, session, cmd~, app~, env~, cwd~)
