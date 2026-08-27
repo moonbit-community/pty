@@ -1,7 +1,27 @@
 ///|
+/// Sends input to the child's terminal.
+/// These are the standard `@async/io.Writer` methods with their usual
+/// semantics: `write_once` performs a single write and reports how many
+/// bytes were accepted, `write` writes the whole buffer before returning,
+/// and `write_reader` forwards everything read from another reader.
 pub extend Pty with @async/io.Writer::{write_once, write, write_reader}
 
 ///|
+/// Reads the child's terminal output (stdout and stderr merged).
+/// These are the standard `@async/io.Reader` methods with their usual
+/// semantics: `read` reads what is immediately available, `read_some`
+/// returns as soon as some data arrives, `read_all` collects until EOF, and
+/// `read_until` / `read_exactly` / `drop` behave as documented on
+/// `@async/io.Reader`.
+///
+/// Read concurrently with `Pty::wait` — do not wait for the child and only
+/// then read: the pty master is a bounded kernel queue, and on macOS the
+/// kernel discards whatever is still queued a few hundred milliseconds after
+/// the child exits. Reading late yields a clean but empty EOF.
+///
+/// On Windows the output is a ConPTY screen rendering rather than a raw
+/// byte stream: expect VT escape sequences (including an initial
+/// clear-screen) surrounding the child's output.
 pub extend Pty with @async/io.Reader::{
   read,
   read_some,

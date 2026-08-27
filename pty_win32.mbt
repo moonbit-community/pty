@@ -33,6 +33,17 @@ priv struct PseudoConsole(@handle.Handle)
 extern "c" fn PseudoConsole::close(hpc : PseudoConsole) = "ClosePseudoConsole"
 
 ///|
+/// A pseudo-terminal attached to a spawned child process.
+///
+/// `Pty` implements `@async/io.Reader` and `@async/io.Writer`: writes send
+/// input to the child's terminal, reads carry the terminal's output (stdout
+/// and stderr merged). On Windows the output is a ConPTY screen rendering,
+/// so it is wrapped in VT escape sequences (including an initial
+/// clear-screen) rather than being the child's raw bytes.
+///
+/// The pty's resources are released when the task group passed to `spawn`
+/// exits. If the group is cancelled, the child gets a 5 s grace period,
+/// then a hard kill.
 #cfg(platform="windows")
 struct Pty {
   input_writer : @async/raw_fd.RawFdStream
@@ -47,6 +58,30 @@ struct Pty {
 const ERROR_FILE_NOT_FOUND : Int = 2
 
 ///|
+/// Spawns a child process attached to a new pseudo-terminal and returns the
+/// `Pty` handle.
+///
+/// The child runs `file` with `args` as its arguments; its `argv[0]` is
+/// `file` verbatim, so programs that dispatch on `argv[0]` (busybox-style
+/// multi-call binaries, shells checking for a leading `-`) see what the
+/// caller wrote. `file` is looked up through `PATH` when it does not contain
+/// a path separator, and used directly otherwise.
+///
+/// * `rows` and `cols` set the initial terminal size in characters.
+/// * `extra_env` adds or overrides environment variables; by default
+///   (`inherit_env=true`) the child also inherits the current process's
+///   environment.
+/// * `cwd` sets the child's working directory; by default the child starts
+///   in the current directory.
+/// * `no_wait` has the same semantics as `@async/process.spawn`: by default
+///   the task group waits for the child to terminate; with `no_wait=true`
+///   the group exits as soon as its own tasks are done, terminating the
+///   child.
+///
+/// The returned `Pty` implements `@async/io.Reader` and `@async/io.Writer`,
+/// and its resources are released when `group` exits. Raises
+/// `@os_error.OSError` if the pty cannot be opened or the child cannot be
+/// spawned.
 #cfg(platform="windows")
 pub async fn[X] spawn(
   group : @async.TaskGroup[X],
@@ -228,6 +263,10 @@ extern "c" fn PseudoConsole::resize(
 ) -> Int = "moonbit_pty_win32_resize"
 
 ///|
+/// Resizes the child's terminal, in characters.
+/// Raises `@os_error.OSError` if the resize fails, including when the pty
+/// has already been closed (for example after the owning task group has
+/// exited).
 #cfg(platform="windows")
 pub fn Pty::resize(
   self : Pty,
@@ -243,6 +282,14 @@ pub fn Pty::resize(
 }
 
 ///|
+/// Waits for the child process to terminate and returns its exit code.
+/// If the process was killed by a signal, the result is `-signal_number`
+/// (the same convention as `@async/process.wait_pid`).
+///
+/// Do not wait first and read afterwards: the pty master is a bounded
+/// kernel queue, and on macOS the kernel discards whatever is still queued
+/// a few hundred milliseconds after the child exits. Read concurrently
+/// while waiting; reading late yields a clean but empty EOF.
 #cfg(platform="windows")
 pub async fn Pty::wait(self : Pty) -> Int {
   return self.result.wait()
@@ -285,6 +332,7 @@ fn Process::close(self : Process) -> Unit {
 }
 
 ///|
+/// The process ID of the spawned child process.
 #cfg(platform="windows")
 pub fn Pty::pid(self : Pty) -> Int {
   self.pid
