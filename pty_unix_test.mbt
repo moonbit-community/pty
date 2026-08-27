@@ -254,3 +254,68 @@ async test "@pty.spawn(no_wait=true) lets the group exit without waiting" {
   }
   assert_true(completed is Some(_))
 }
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.Pty::pid is the pid of the spawned child" {
+  @async.with_task_group() <| group => {
+    // `$$` is the shell's own pid, which is the pid fork returned by spawn;
+    // the string comparison also proves pid() is a real positive value.
+    let pty = @pty.spawn(group, "sh", ["-c", "echo $$"])
+    assert_true(pty.pid() > 0)
+    assert_eq(pty.read_all().text().trim().to_owned(), pty.pid().to_string())
+    assert_eq(pty.wait(), 0)
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.spawn(extra_env~) merges over the inherited environment" {
+  // Variables only this test process exports, so the child's view is fully
+  // determined here: one is inherited untouched, one is overridden by
+  // extra_env, one exists only in extra_env.
+  @env.set_env_var("MOONBIT_PTY_TEST_INHERITED", "parent")
+  @env.set_env_var("MOONBIT_PTY_TEST_OVERRIDDEN", "parent")
+  defer {
+    @env.unset_env_var("MOONBIT_PTY_TEST_INHERITED")
+    @env.unset_env_var("MOONBIT_PTY_TEST_OVERRIDDEN")
+  }
+  @async.with_task_group() <| group => {
+    let pty = @pty.spawn(
+      group,
+      "sh",
+      [
+        "-c", "echo \"$MOONBIT_PTY_TEST_INHERITED $MOONBIT_PTY_TEST_OVERRIDDEN $MOONBIT_PTY_TEST_NEW\"",
+      ],
+      extra_env=Map([
+        ("MOONBIT_PTY_TEST_OVERRIDDEN", "child"),
+        ("MOONBIT_PTY_TEST_NEW", "new"),
+      ]),
+    )
+    assert_eq(pty.read_all().text(), "parent child new\r\n")
+    assert_eq(pty.wait(), 0)
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.spawn(inherit_env=false) starts the child with an empty environment" {
+  // The child not seeing a variable this process exports proves nothing was
+  // inherited, without depending on which variables sh leaves alone when
+  // they are missing (zsh, for one, synthesizes HOME from passwd). `sh` is
+  // deliberately relative: with no PATH in the environment, spawn falls back
+  // to "/usr/bin:/bin" to resolve it.
+  @env.set_env_var("MOONBIT_PTY_TEST_DROPPED", "parent")
+  defer @env.unset_env_var("MOONBIT_PTY_TEST_DROPPED")
+  @async.with_task_group() <| group => {
+    let pty = @pty.spawn(
+      group,
+      "sh",
+      ["-c", "echo \"${MOONBIT_PTY_TEST_DROPPED-unset} $ONLY_EXTRA\""],
+      inherit_env=false,
+      extra_env=Map([("ONLY_EXTRA", "kept")]),
+    )
+    assert_eq(pty.read_all().text(), "unset kept\r\n")
+    assert_eq(pty.wait(), 0)
+  }
+}
