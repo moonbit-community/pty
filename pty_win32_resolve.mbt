@@ -67,6 +67,12 @@ fn append_exe(file : StringView) -> String {
       [] | [.., '/' | '\\' | ':'] => break "\{file}.exe"
       [.. rest, _] => continue rest
     }
+  } where {
+    proof_invariant: view.length() <= file.length(),
+    proof_reasoning: (
+      #| each iteration strips the last code unit, so view is a
+      #| strictly shorter suffix of file and the loop terminates
+    ),
   }
 }
 

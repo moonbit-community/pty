@@ -18,15 +18,22 @@ extern "c" fn handle_close(handle : Handle) -> Int = "CloseHandle"
 extern "c" fn handle_close(handle : Handle) -> Int = "close"
 
 ///|
+/// Closes the underlying file descriptor (unix) or handle (win32).
+///
+/// This is a bare `close(2)` / `CloseHandle`: closing twice would hit
+/// whatever unrelated descriptor has been handed the recycled number in
+/// between, so callers must guard against double closes themselves.
 pub fn Handle::close(self : Handle) -> Unit {
   handle_close(self) |> ignore()
 }
 
 ///|
+/// Wraps the handle in a `@async/raw_fd.RawFdStream` for asynchronous reads
+/// and writes.
 pub async fn Handle::to_raw_fd_stream(
   self : Handle,
 ) -> @async/raw_fd.RawFdStream {
-  @async/raw_fd.RawFdStream(self.0)
+  RawFdStream(self.0)
 }
 
 ///|
@@ -45,6 +52,8 @@ pub fn Handle::invalid() -> Handle {
 }
 
 ///|
+/// Recovers the `Handle` behind a `RawFdStream` without taking ownership of
+/// the descriptor.
 pub fn borrow_raw_fd_stream(
   raw_fd_stream : @async/raw_fd.RawFdStream,
 ) -> Handle {
