@@ -200,7 +200,7 @@ async test "@pty.Pty::resize raises EBADF after the group closed the pty" {
   }
   guard pty is Some(pty) else { fail("pty was not spawned") }
   try pty.resize(rows=10, cols=10) catch {
-    @os_error.OSError(EBADF, ..) => ()
+    OSError(EBADF, ..) => ()
     error => raise error
   } noraise {
     _ => fail("expected resize on a closed pty to raise EBADF")

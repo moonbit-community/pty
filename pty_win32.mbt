@@ -214,7 +214,7 @@ pub async fn[X] spawn(
     input_writer.close()
     output_reader.close()
   }
-  { input_writer, output_reader, hpc, pid, result }
+  { input_writer, output_reader, hpc, pid, result, }
 }
 
 ///|

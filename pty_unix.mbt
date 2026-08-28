@@ -228,7 +228,7 @@ pub async fn[X] spawn(
     }
   }
   group.add_defer() <| () => { close_primary() }
-  { closed, primary, pid, result }
+  { closed, primary, pid, result, }
 }
 
 ///|
@@ -313,10 +313,10 @@ pub fn Pty::resize(
   cols~ : Int,
 ) -> Unit raise @os_error.OSError {
   if self.closed.val {
-    raise @os_error.OSError(EBADF, context="@pty.Pty::resize")
+    raise OSError(EBADF, context="@pty.Pty::resize")
   }
   if pty_resize(@handle.borrow_raw_fd_stream(self.primary), rows~, cols~) != 0 {
-    raise @os_error.OSError(@os_error.get_errno(), context="@pty.Pty::resize")
+    raise OSError(@os_error.get_errno(), context="@pty.Pty::resize")
   }
 }
 
@@ -349,6 +349,14 @@ fn get_path_candidates(
       }
       [_, .. rest] => continue rest, dirp
     }
+  } where {
+    proof_invariant: dirp.start_offset() <= p.start_offset(),
+    proof_invariant: p.length() <= view.length(),
+    proof_reasoning: (
+      #| p advances one code unit per iteration, or is reset to
+      #| rest after emitting a segment; dirp stays put or moves forward to rest,
+      #| so both stay inside view and p strictly shrinks on every path
+    ),
   }
 }
 

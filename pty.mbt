@@ -48,7 +48,9 @@ pub extend Pty with @async/io.Reader::{_direct_read, _get_internal_buffer}
 // `background` starts tearing the terminal down.
 //
 // `on_waiter` is a test hook (pty_wbtest.mbt): it hands out the waiter task
-// so a test can cancel it the way the runtime would.
+// so a test can cancel it the way the runtime would. Only that whitebox test
+// supplies it, so silence unused_optional_argument.
+#warnings("-unused_optional_argument")
 async fn wait_pid_with(
   pid : Int,
   background : async () -> Unit,
