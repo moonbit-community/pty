@@ -1,6 +1,6 @@
 name = "moonbit-community/pty"
 
-version = "0.4.1"
+version = "0.4.2"
 
 import {
   "moonbitlang/async@0.22.1",
@@ -8,7 +8,7 @@ import {
 
 readme = "README.md"
 
-repository = "https://github.com/moonbit-community/tonyfettes-pty"
+repository = "https://github.com/moonbit-community/pty"
 
 license = "Apache-2.0"
 
