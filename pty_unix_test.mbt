@@ -319,3 +319,43 @@ async test "@pty.spawn(inherit_env=false) starts the child with an empty environ
     assert_eq(pty.wait(), 0)
   }
 }
+
+///|
+/// The cancellation cleanup must finish the child even when closing its
+/// terminal cannot: this child ignores SIGHUP (the disposition survives
+/// `exec`), so only the cleanup's SIGKILL after the grace period ends it.
+/// Without that kill the child leaks — the group no longer waits for it,
+/// because the child's `wait_pid` task was itself cancelled.
+///
+/// The group does not return until the cleanup has reaped the child, so the
+/// pid is gone by the time `with_task_group` returns; the poll only makes the
+/// probe tolerant of a slow parent-side teardown.
+#cfg(not(platform="windows"))
+async test "@pty.spawn cancellation kills a child that ignores SIGHUP" {
+  let mut pid = 0
+  @async.with_task_group() <| group => {
+    let pty = @pty.spawn(
+      group,
+      "sh",
+      ["-c", "trap '' HUP; printf 'READY\\n'; exec sleep 3600"],
+      no_wait=true,
+    )
+    pid = pty.pid()
+    // Returning from the group body cancels the no_wait task. Wait for the
+    // marker first so SIGHUP is already ignored when cancellation closes
+    // the terminal, regardless of how long the child takes to start.
+    assert_eq(pty.read_exactly(7), b"READY\r\n")
+  }
+  // `kill -0` succeeds only while the pid exists, and a reaped child leaves
+  // none behind; SIGKILL itself is asynchronous, hence the bounded poll. The
+  // grace period is 5000ms (docs/invariants.md), hence the ~5s bound.
+  let mut alive = true
+  for _ in 0..<24 {
+    if @async/process.run("sh", ["-c", "kill -0 \{pid} 2>/dev/null"]) != 0 {
+      alive = false
+      break
+    }
+    @async.sleep(250)
+  }
+  assert_false(alive)
+}

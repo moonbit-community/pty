@@ -209,22 +209,24 @@ pub async fn[X] spawn(
     }
   }
   let result = group.spawn(no_wait?) <| () => {
-    @async/process.wait_pid(pid) catch {
-      error if @async.is_being_cancelled() => {
-        // Reap the child even though we are being cancelled, then propagate
-        // the cancellation like `@async/process.spawn` does.
-        let _ = @async.protect_from_cancel() <| () => {
-          wait_pid_with(pid) <| () => {
-            close_primary()
-            // Grace period before the hard kill; keep in sync with the
-            // win32 side (pty_win32.mbt), which is not type-checked here.
-            @async.sleep(5000)
-            pty_unix_kill_group(pid) |> ignore()
-          }
+    if @async.handle_cancellation(() => @async/process.wait_pid(pid))
+      is Some(status) {
+      status
+    } else {
+      // Cancelled: reap the child anyway — close its terminal, give it the
+      // grace period, then kill the group — and complete with its exit
+      // status, like `@async/process.spawn` does. `try ... catch` no longer
+      // observes cancellation (async 0.22), so this match is the only thing
+      // that makes the cleanup run at all.
+      @async.protect_from_cancel() <| () => {
+        wait_pid_with(pid) <| () => {
+          close_primary()
+          // Grace period before the hard kill; keep in sync with the
+          // win32 side (pty_win32.mbt), which is not type-checked here.
+          @async.sleep(5000)
+          pty_unix_kill_group(pid) |> ignore()
         }
-        raise error
       }
-      error => raise error
     }
   }
   group.add_defer() <| () => { close_primary() }

@@ -13,18 +13,29 @@ rationale. Nothing here is pending work; it is documented so it doesn't get
   not type-checked, so a change to one side cannot be caught by the compiler
   on the other — keep them in sync by hand.
 - In the cancellation cleanup the `wait_pid` waiter is a spawned task
-  (`wait_pid_with` in `pty.mbt`), never the main task of a `with_task_group`,
-  and the cleanup re-raises `Cancelled` afterwards, like
-  `@async/process.spawn` (decided 2026-08-26). Reason: moonbitlang/async's
-  `with_task_group` aborts the process (`result.unwrap()` on a `Done` group
-  with no result, `task_group.mbt:268` as of 0.21.0) when its main task is
-  cancelled directly by the runtime, which `EventLoop::cleanup` does to every
-  fd/pid waiter after a fatal error in the host event loop. With the waiter as
-  a child task the group fails with `Cancelled` instead. `pty_wbtest.mbt`
-  guards this by cancelling the waiter through the `on_waiter` hook; the
-  end-to-end reproduction (a fake `ExternalEventLoop` whose `poll` raises
-  while the cleanup group is alive) is not in the repo. Do not fold the
+  (`wait_pid_with` in `pty.mbt`), never the main task of a `with_task_group`.
+  Reason: moonbitlang/async's `with_task_group` aborts the process
+  (`result.unwrap()` on a `Done` group with no result, `task_group.mbt:270` as
+  of 0.22.1) when its main task is cancelled directly by the runtime, which
+  `EventLoop::cleanup` does to every fd/pid waiter after a fatal error in the
+  host event loop. With the waiter as a child task the group fails with
+  `@async.TaskCancelled` instead, and `Task::wait` propagates that error.
+  `pty_wbtest.mbt` guards this by cancelling the waiter through the `on_waiter`
+  hook; the end-to-end reproduction (a fake `ExternalEventLoop` whose `poll`
+  raises while the cleanup group is alive) is not in the repo. Do not fold the
   waiter back into the main task.
+- The cleanup that runs after cancellation is entered through
+  `@async.handle_cancellation` + `@async.protect_from_cancel`, never a `catch`
+  arm (decided 2026-09-22, async 0.22). In 0.22 `catch` stopped observing
+  cancellation — `Cancelled` is no longer an error, the signal is a runtime
+  primitive — so the `error if @async.is_being_cancelled()` form the library
+  used at 0.21 became dead code: closing the terminal, the grace period, and
+  the SIGKILL silently stopped running while the code still looked
+  responsible. The 0.22 form completes with the child's exit status rather
+  than re-raising, like 0.22's own `@async/process.spawn`; the only public way
+  to re-raise (`@async.pause`) is an unrelated scheduling yield. The
+  SIGHUP-ignoring child test in `pty_unix_test.mbt` is the guard — it fails if
+  the cleanup does not run.
 
 ## Unix
 
