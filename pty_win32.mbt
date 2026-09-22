@@ -187,28 +187,29 @@ pub async fn[X] spawn(
     defer (if !job.is_invalid() { job.close() })
     defer process.close()
     defer close_pseudo_console()
-    match @async.handle_cancellation(() => @async/process.wait_pid(pid)) {
-      Some(status) => status
-      None =>
-        // Cancelled: reap the child anyway — close the pseudo console, give it
-        // the grace period, then hard kill — and complete with its exit
-        // status, like `@async/process.spawn` does. `try ... catch` no longer
-        // observes cancellation (async 0.22), so this match is the only thing
-        // that makes the cleanup run at all.
-        @async.protect_from_cancel() <| () => {
-          wait_pid_with(pid) <| () => {
-            close_pseudo_console()
-            // Grace period before the hard kill; matches the ~5s the OS
-            // itself grants on CTRL_CLOSE_EVENT. Keep in sync with the
-            // unix side (pty_unix.mbt), which is not type-checked here.
-            @async.sleep(5000)
-            if !job.is_invalid() {
-              job.terminate(1) |> ignore()
-            } else {
-              process.terminate(1) |> ignore()
-            }
+    if @async.handle_cancellation(() => @async/process.wait_pid(pid))
+      is Some(status) {
+      status
+    } else {
+      // Cancelled: reap the child anyway — close the pseudo console, give it
+      // the grace period, then hard kill — and complete with its exit
+      // status, like `@async/process.spawn` does. `try ... catch` no longer
+      // observes cancellation (async 0.22), so this match is the only thing
+      // that makes the cleanup run at all.
+      @async.protect_from_cancel() <| () => {
+        wait_pid_with(pid) <| () => {
+          close_pseudo_console()
+          // Grace period before the hard kill; matches the ~5s the OS
+          // itself grants on CTRL_CLOSE_EVENT. Keep in sync with the
+          // unix side (pty_unix.mbt), which is not type-checked here.
+          @async.sleep(5000)
+          if !job.is_invalid() {
+            job.terminate(1) |> ignore()
+          } else {
+            process.terminate(1) |> ignore()
           }
         }
+      }
     }
   }
   group.add_defer() <| () => {
