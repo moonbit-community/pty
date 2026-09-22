@@ -125,7 +125,7 @@ pub async fn[X] spawn(
   // into `[file, ..args]`. `CreateProcessW` mutates this buffer in place, so
   // `to_string` must hand back a fresh heap copy (never a string literal).
   let cmd = {
-    let sb = StringBuilder::new()
+    let sb = StringBuilder()
     sb.write_arg_with_windows_escape(file)
     for arg in args {
       sb..write_char(' ').write_arg_with_windows_escape(arg)
