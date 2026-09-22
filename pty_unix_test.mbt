@@ -328,15 +328,23 @@ async test "@pty.spawn(inherit_env=false) starts the child with an empty environ
 /// because the child's `wait_pid` task was itself cancelled.
 ///
 /// The group does not return until the cleanup has reaped the child, so the
-/// pid is gone by the time `with_timeout_opt` returns; the poll only makes the
+/// pid is gone by the time `with_task_group` returns; the poll only makes the
 /// probe tolerant of a slow parent-side teardown.
 #cfg(not(platform="windows"))
 async test "@pty.spawn cancellation kills a child that ignores SIGHUP" {
   let mut pid = 0
-  let _ = @async.with_timeout_opt(200) <| () => {
-    @async.with_task_group() <| group => {
-      pid = @pty.spawn(group, "sh", ["-c", "trap '' HUP; exec sleep 3600"]).pid()
-    }
+  @async.with_task_group() <| group => {
+    let pty = @pty.spawn(
+      group,
+      "sh",
+      ["-c", "trap '' HUP; printf 'READY\\n'; exec sleep 3600"],
+      no_wait=true,
+    )
+    pid = pty.pid()
+    // Returning from the group body cancels the no_wait task. Wait for the
+    // marker first so SIGHUP is already ignored when cancellation closes
+    // the terminal, regardless of how long the child takes to start.
+    assert_eq(pty.read_exactly(7), b"READY\r\n")
   }
   // `kill -0` succeeds only while the pid exists, and a reaped child leaves
   // none behind; SIGKILL itself is asynchronous, hence the bounded poll. The
