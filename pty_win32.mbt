@@ -187,11 +187,15 @@ pub async fn[X] spawn(
     defer (if !job.is_invalid() { job.close() })
     defer process.close()
     defer close_pseudo_console()
-    @async/process.wait_pid(pid) catch {
-      error if @async.is_being_cancelled() => {
-        // Reap the child even though we are being cancelled, then propagate
-        // the cancellation like `@async/process.spawn` does.
-        let _ = @async.protect_from_cancel() <| () => {
+    match @async.handle_cancellation(() => @async/process.wait_pid(pid)) {
+      Some(status) => status
+      None =>
+        // Cancelled: reap the child anyway — close the pseudo console, give it
+        // the grace period, then hard kill — and complete with its exit
+        // status, like `@async/process.spawn` does. `try ... catch` no longer
+        // observes cancellation (async 0.22), so this match is the only thing
+        // that makes the cleanup run at all.
+        @async.protect_from_cancel() <| () => {
           wait_pid_with(pid) <| () => {
             close_pseudo_console()
             // Grace period before the hard kill; matches the ~5s the OS
@@ -205,9 +209,6 @@ pub async fn[X] spawn(
             }
           }
         }
-        raise error
-      }
-      error => raise error
     }
   }
   group.add_defer() <| () => {

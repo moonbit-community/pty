@@ -41,9 +41,10 @@ pub extend Pty with @async/io.Reader::{_direct_read, _get_internal_buffer}
 // period, hard kill, ...). The waiter is a spawned task on purpose, never the
 // main task of the group: if the runtime cancels the waiter directly
 // (`EventLoop::cleanup` after a fatal error in the host event loop), the
-// group fails with `Cancelled` instead of reaching `with_task_group`'s
-// `result.unwrap()` on a `Done` group with no result, which aborts the whole
-// process (moonbitlang/async task_group.mbt:268). See repro/ for both shapes.
+// group fails with `@async.TaskCancelled` instead of reaching
+// `with_task_group`'s `result.unwrap()` on a `Done` group with no result,
+// which aborts the whole process (moonbitlang/async task_group.mbt:270 as of
+// 0.22.1). See repro/ for both shapes.
 // The waiter is spawned first so that it registers for the child before
 // `background` starts tearing the terminal down.
 //

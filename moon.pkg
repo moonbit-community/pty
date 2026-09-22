@@ -12,6 +12,7 @@ import {
 
 import {
   "moonbitlang/async/fs" @async/fs,
+  "moonbitlang/async/process" @async/process,
   "moonbitlang/core/test",
 } for "test"
 
