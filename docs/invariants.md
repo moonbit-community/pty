@@ -16,10 +16,10 @@ rationale. Nothing here is pending work; it is documented so it doesn't get
   (`wait_pid_with` in `pty.mbt`), never the main task of a `with_task_group`.
   Reason: moonbitlang/async's `with_task_group` aborts the process
   (`result.unwrap()` on a `Done` group with no result, `task_group.mbt:270` as
-  of 0.22.1) when its main task is cancelled directly by the runtime, which
+  of 0.22.4) when its main task is cancelled directly by the runtime, which
   `EventLoop::cleanup` does to every fd/pid waiter after a fatal error in the
   host event loop. With the waiter as a child task the group fails with
-  `@async.TaskCancelled` instead, and `Task::wait` propagates that error.
+  `@async.WaitedTaskAlreadyCancelled` instead, and `Task::wait` propagates that error.
   `pty_wbtest.mbt` guards this by cancelling the waiter through the `on_waiter`
   hook; the end-to-end reproduction (a fake `ExternalEventLoop` whose `poll`
   raises while the cleanup group is alive) is not in the repo. Do not fold the

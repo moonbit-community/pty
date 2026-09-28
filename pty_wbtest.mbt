@@ -2,14 +2,14 @@
 // Guards the cancellation-cleanup shape recorded in docs/invariants.md.
 // When the runtime cancels the `wait_pid` waiter directly (what
 // `EventLoop::cleanup` does to every fd/pid waiter after a fatal error in the
-// host event loop), `wait_pid_with` must fail with `@async.TaskCancelled`
+// host event loop), `wait_pid_with` must fail with `@async.WaitedTaskAlreadyCancelled`
 // instead of reaching `with_task_group`'s `result.unwrap()` on a `Done` group
 // with no result, which aborts the whole process. `Task::cancel` is the same
 // `Coroutine::cancel` the runtime uses, so the hook reproduces that condition
 // exactly; the old shape (waiting in the group's main task) has no task to
 // hand out and would abort here.
 #cfg(not(platform="windows"))
-async test "wait_pid_with: waiter cancelled by the runtime raises TaskCancelled" {
+async test "wait_pid_with: waiter cancelled by the runtime raises WaitedTaskAlreadyCancelled" {
   // Outlives the cancellation; nobody reaps it afterwards and the zombie is
   // collected when the test binary exits.
   let pid = @async/process.spawn_orphan("sleep", ["1"])
@@ -24,10 +24,13 @@ async test "wait_pid_with: waiter cancelled by the runtime raises TaskCancelled"
       on_waiter=t => waiter.val = Some(t),
     )
   catch {
-    @async.TaskCancelled => ()
-    error => fail("expected @async.TaskCancelled, got \{error}")
+    @async.WaitedTaskAlreadyCancelled => ()
+    error => fail("expected @async.WaitedTaskAlreadyCancelled, got \{error}")
   } noraise {
-    status => fail("expected @async.TaskCancelled, got exit status \{status}")
+    status =>
+      fail(
+        "expected @async.WaitedTaskAlreadyCancelled, got exit status \{status}",
+      )
   }
   // The cancellation came from the waiter, not from this task.
   assert_false(@async.is_being_cancelled())
