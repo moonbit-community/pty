@@ -27,7 +27,10 @@ async test "wait_pid_with: waiter cancelled by the runtime raises WaitedTaskAlre
     @async.WaitedTaskAlreadyCancelled => ()
     error => fail("expected @async.WaitedTaskAlreadyCancelled, got \{error}")
   } noraise {
-    status => fail("expected @async.WaitedTaskAlreadyCancelled, got exit status \{status}")
+    status =>
+      fail(
+        "expected @async.WaitedTaskAlreadyCancelled, got exit status \{status}",
+      )
   }
   // The cancellation came from the waiter, not from this task.
   assert_false(@async.is_being_cancelled())
