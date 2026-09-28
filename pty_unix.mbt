@@ -258,7 +258,7 @@ pub fn Pty::pid(self : Pty) -> Int {
 #cfg(not(platform="windows"))
 #warnings("-alert_internal")
 pub impl @async/io.Reader for Pty with fn _get_internal_buffer(self : Pty) -> @async/io.ReaderBuffer {
-  self.primary._get_internal_buffer()
+  @async/io.Reader::_get_internal_buffer(self.primary)
 }
 
 ///|
@@ -273,7 +273,7 @@ pub impl @async/io.Reader for Pty with fn _direct_read(
   offset~ : Int,
   max_len~ : Int,
 ) -> Int {
-  self.primary._direct_read(buf, offset~, max_len~) catch {
+  @async/io.Reader::_direct_read(self.primary, buf, offset~, max_len~) catch {
     @os_error.OSError(EIO, ..) => 0
     error => raise error
   }
