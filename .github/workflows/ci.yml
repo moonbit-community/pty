@@ -48,7 +48,7 @@ jobs:
         run: moon update
 
       - name: Check
-        run: moon check
+        run: moon check --deny-warn
 
       - name: Verify generated interfaces
         run: moon info
