@@ -11,14 +11,13 @@ let exit_code = @pty.with_pty(
   "sh", [],
   rows=24, cols=80,
   cwd="/workspace",
-  pty => {
-    let pid : Int = pty.pid()
-    pty.resize(rows=40, cols=120)
-    pty.write(b"ls\nexit\n")          // Pty implements @io.Writer
-    let text = pty.read_all().text()  // ... and @io.Reader
-    pty.wait()
-  },
-)
+) <| pty => {
+  let pid : Int = pty.pid()
+  pty.resize(rows=40, cols=120)
+  pty.write(b"ls\nexit\n")          // Pty implements @io.Writer
+  let text = pty.read_all().text()  // ... and @io.Reader
+  pty.wait()
+}
 ```
 
 `with_pty` spawns `file` with `args` on a new pseudo-terminal, runs the
@@ -41,13 +40,13 @@ concurrently — spawn the pty into it directly with `spawn`, which takes the
 group as its first argument and otherwise the same arguments:
 
 ```moonbit
-@async.with_task_group(session => {
+@async.with_task_group() <| session => {
   let pty = @pty.spawn(session, "sh", [])
   session.spawn_bg(no_wait=true, () => forward_input(pty))
   while pty.read_some() is Some(chunk) {
     handle(chunk)
   }
-})
+}
 ```
 
 The pty's resources are released when that group exits. If the group is

@@ -53,10 +53,10 @@ async test "wait_pid_with: returns the child's exit status" {
 #cfg(not(platform="windows"))
 async test "with_pty: sessions do not accumulate file descriptors" {
   async fn session_fd() -> Int {
-    with_pty("true", [], pty => {
+    with_pty("true", []) <| pty => {
       pty.read_all() |> ignore()
       pty.primary.fd
-    })
+    }
   }
   let first = session_fd()
   let mut highest = first

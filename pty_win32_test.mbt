@@ -217,9 +217,9 @@ async test "@pty.spawn cancellation ends a child that floods an unread pty" {
 ///|
 #cfg(platform="windows")
 async test "@pty.with_pty runs f with the pty and returns its result" {
-  let text = @pty.with_pty("cmd", ["/c", "echo", "hello"], pty => {
+  let text = @pty.with_pty("cmd", ["/c", "echo", "hello"]) <| pty => {
     pty.read_all().text()
-  })
+  }
   assert_true(text.contains("hello"))
   assert_eq(@pty.with_pty("cmd", ["/c", "exit", "7"], pty => pty.wait()), 7)
 }
@@ -230,10 +230,10 @@ async test "@pty.with_pty closes the pty when f returns" {
   // Letting the `Pty` escape is exactly what callers must not do; it is the
   // only way to observe from outside that the terminal was closed. Reading
   // to EOF first lets the child exit on its own before `f` returns.
-  let pty = @pty.with_pty("cmd", ["/c", "echo", "bye"], pty => {
+  let pty = @pty.with_pty("cmd", ["/c", "echo", "bye"]) <| pty => {
     pty.read_all() |> ignore()
     pty
-  })
+  }
   try pty.resize(rows=10, cols=10) catch {
     @os_error.OSError(EBADF, ..) => ()
     error => raise error
