@@ -77,16 +77,18 @@ async fn wait_pid_with(
 /// once it has been reaped. Call `Pty::wait` inside `f` to let the child
 /// finish on its own and to get its exit code.
 ///
-/// Prefer this over `spawn` whenever the pty's lifetime is a lexical scope:
-/// `spawn` keeps the pty open until its task group exits, so a long-lived
-/// group that spawns many ptys accumulates their file descriptors.
+/// Prefer this over `spawn` when the pty's lifetime is a lexical scope and
+/// no task group with that lifetime exists yet: `spawn` keeps the pty open
+/// until its task group exits, so a long-lived group that spawns many ptys
+/// accumulates their file descriptors.
 ///
 /// `rows`, `cols`, `file`, `args`, `extra_env`, `inherit_env` and `cwd` are
 /// those of `spawn`, with the same defaults.
 ///
 /// Do not let the `Pty` escape `f`: it is closed afterwards, and a task
-/// still blocked reading it is not woken up. Tasks that read or write
-/// concurrently belong in a task group opened inside `f`.
+/// still blocked reading it is not woken up. When tasks need to read or
+/// write the pty concurrently, open a task group for them and `spawn` the
+/// pty into that group directly, rather than nesting one inside `with_pty`.
 pub async fn[T] with_pty(
   rows? : Int,
   cols? : Int,

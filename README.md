@@ -51,11 +51,24 @@ returns once it has been reaped. Call `pty.wait()` inside the callback to let
 the child finish on its own.
 
 Do not let the `Pty` escape the callback: it is closed afterwards, and a task
-still blocked reading it is not woken up. Tasks that read or write
-concurrently belong in a task group opened inside the callback.
+still blocked reading it is not woken up.
 
-Use `spawn` when the pty must outlive the code that created it, or should
-share the lifetime of a task group you already have.
+Use `spawn` instead when you already have a task group whose lifetime is the
+pty's — typically a session that needs tasks reading and writing
+concurrently. Spawn the pty into that group directly rather than nesting one
+inside `with_pty`:
+
+```moonbit
+@async.with_task_group(session => {
+  let pty = @pty.spawn(session, "sh", [])
+  session.spawn_bg(no_wait=true, () => forward_input(pty))
+  while pty.read_some() is Some(chunk) {
+    handle(chunk)
+  }
+})
+```
+
+The one thing to avoid is spawning many ptys into a single long-lived group.
 
 ## Drain the pty concurrently
 
