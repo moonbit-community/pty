@@ -2,7 +2,7 @@
 // Userland executable resolution for win32: `spawn` probes these candidates
 // with `win32_file_exists` and hands the winner to `CreateProcessW`'s
 // `lpApplicationName`, so that `cwd~` participates in the search and the
-// parent's own cwd does not (see README "Executable resolution").
+// parent's own cwd does not (see docs/internals.md "Executable resolution").
 
 ///|
 #cfg(platform="windows")
