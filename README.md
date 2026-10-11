@@ -10,14 +10,14 @@ event loop instead of blocking the thread.
 @async.with_task_group(group => {
   let pty = @pty.spawn(
     group,
-    "sh", ["-c", "echo hello"],
+    "sh", [],
     rows=24, cols=80,
     cwd="/workspace",
   )
-  let text = pty.read_all().text()  // Pty implements @io.Reader
-  pty.write(b"ls\n")                // ... and @io.Writer
-  pty.resize(rows=40, cols=120)
   let pid : Int = pty.pid()
+  pty.resize(rows=40, cols=120)
+  pty.write(b"ls\nexit\n")          // Pty implements @io.Writer
+  let text = pty.read_all().text()  // ... and @io.Reader
   let exit_code : Int = pty.wait()
 })
 ```

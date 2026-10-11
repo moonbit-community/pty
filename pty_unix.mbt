@@ -120,7 +120,7 @@ pub async fn[X] spawn(
     file~,
     path=env.get_or_default("PATH", "/usr/bin:/bin"),
   )
-  // `argv[0]` is `file` verbatim, not the path `resolve_path` picked. This is
+  // `argv[0]` is `file` verbatim, not the candidate `execve` picked. This is
   // what `execvp` (hence moonbitlang/async's `posix_spawnp`) does, and programs
   // that dispatch on `argv[0]` — busybox-style multi-call binaries, shells
   // checking for a leading `-` — need to see what the caller wrote.

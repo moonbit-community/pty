@@ -85,7 +85,7 @@ non-ASCII keys.)
 
 ## Unix: fork + execve
 
-The parent opens the pty pair (`posix_openpt`/`grantpt`/`unlockpt`) and
+The parent opens the pty pair (`open("/dev/ptmx")`/`grantpt`/`unlockpt`) and
 prepares everything the child will need — encoded argv, envp, and the PATH
 candidate list — *before* forking, because the forked child does only
 async-signal-safe work and never allocates. The child then: `setsid`, adopts

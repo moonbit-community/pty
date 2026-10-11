@@ -44,7 +44,7 @@ pub extend Pty with @async/io.Reader::{_direct_read, _get_internal_buffer}
 // group fails with `@async.WaitedTaskAlreadyCancelled` instead of reaching
 // `with_task_group`'s `result.unwrap()` on a `Done` group with no result,
 // which aborts the whole process (moonbitlang/async task_group.mbt:270 as of
-// 0.22.4). See repro/ for both shapes.
+// 0.22.4). See docs/invariants.md; pty_wbtest.mbt guards it.
 // The waiter is spawned first so that it registers for the child before
 // `background` starts tearing the terminal down.
 //
