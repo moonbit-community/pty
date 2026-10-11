@@ -12,8 +12,11 @@ rather than each platform's ambient default:
 - **Relative path containing a separator** — resolved against `cwd` (or the
   parent's current directory when `cwd` is omitted). Never searched in PATH.
 - **Bare name** — searched through the `PATH` of the *child's* merged
-  environment (`inherit_env` + `extra_env`); first match wins. An empty or
-  missing `PATH` means a bare name is simply not found.
+  environment (`inherit_env` + `extra_env`); first match wins. Empty entries
+  (a leading or trailing separator, a doubled one, or an empty `PATH`) are
+  skipped, so an empty `PATH` means a bare name is simply not found. A
+  *missing* `PATH` is also not found on Windows; unix falls back to
+  `/usr/bin:/bin`, as `execvp` does.
 
 A `file` that cannot be resolved raises before any process or ConPTY is
 created. Failures throughout the library are the usual
@@ -53,6 +56,12 @@ Documented so they stay deliberate:
   shape. Spawn batch files by explicit name, and do not pass untrusted
   arguments to them: cmd.exe parses them under different quoting rules than
   `CommandLineToArgvW`, and this library escapes for the latter.
+- **An empty `PATH` entry is not the current directory.** `execvp` reads
+  `PATH=:/bin`, `/bin:`, or an empty `PATH` as "also search the current
+  directory", which silently lets a bare name run whatever sits in `cwd`.
+  This library skips empty entries on both platforms; to search `cwd`, name
+  it explicitly (`.` in `PATH`, or `./prog` as `file`). Go's `LookPath`
+  refuses the implicit form for the same reason.
 - **Unix keeps searching past an `EACCES` candidate (execvp semantics);
   Windows stops at the first existing match** and lets `CreateProcessW`
   report `ERROR_ACCESS_DENIED` or `ERROR_BAD_EXE_FORMAT`. Windows has no
