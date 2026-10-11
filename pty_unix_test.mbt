@@ -392,3 +392,45 @@ async test "@pty.spawn cancellation kills a child that ignores SIGHUP" {
   }
   assert_false(alive)
 }
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.with_pty runs f with the pty and returns its result" {
+  assert_eq(
+    @pty.with_pty("echo", ["hello"], pty => pty.read_all().text()),
+    "hello\r\n",
+  )
+  assert_eq(@pty.with_pty("sh", ["-c", "exit 7"], pty => pty.wait()), 7)
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.with_pty hangs up a child that is still running when f returns" {
+  // Completing inside the timeout is the first assertion: `f` returns at
+  // once while `sleep` would run for an hour, so `with_pty` must end the
+  // child rather than wait for it.
+  let mut pid = 0
+  let completed = @async.with_timeout_opt(2000) <| () => {
+    @pty.with_pty("sleep", ["3600"], pty => pid = pty.pid())
+  }
+  assert_true(completed is Some(_))
+  // `with_pty` returns only after the child has been reaped, so the pid is
+  // already gone: `kill -0` succeeds only while it exists.
+  assert_true(
+    @async/process.run("sh", ["-c", "kill -0 \{pid} 2>/dev/null"]) != 0,
+  )
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "@pty.with_pty closes the pty when f returns" {
+  // Letting the `Pty` escape is exactly what callers must not do; it is the
+  // only way to observe from outside that the terminal was closed.
+  let pty = @pty.with_pty("true", [], pty => pty)
+  try pty.resize(rows=10, cols=10) catch {
+    @os_error.OSError(EBADF, ..) => ()
+    error => raise error
+  } noraise {
+    _ => fail("expected resize after with_pty returned to raise EBADF")
+  }
+}
