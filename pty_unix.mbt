@@ -336,13 +336,13 @@ fn get_path_candidates(
   for p = view, dirp = view {
     match p {
       ([] as rest) | [':', .. rest] => {
+        // Empty entries are skipped, not read as the current directory (the
+        // traditional execvp reading): a bare name never resolves against
+        // `cwd` unless PATH names it explicitly. See docs/internals.md.
         let dir = path[dirp.start_offset():p.start_offset()]
-        let absolute = if dir is [] {
-          @encoding/utf8.encode(file)
-        } else {
-          @encoding/utf8.encode("\{dir}/\{file}")
+        if !dir.is_empty() {
+          candidates.push(@encoding/utf8.encode("\{dir}/\{file}"))
         }
-        candidates.push(absolute)
         if rest is [] {
           break FixedArray::from_array(candidates)
         } else {
@@ -375,4 +375,14 @@ test "get_path_candidates" {
   assert_eq(get_path_candidates(file="nosuchprog", path="/usr/bin:/bin"), [
     b"/usr/bin/nosuchprog", b"/bin/nosuchprog",
   ])
+  // Empty entries — leading, trailing, doubled, or the whole PATH — yield no
+  // candidate; "." is an ordinary entry and is kept.
+  assert_eq(get_path_candidates(file="sh", path=""), [])
+  assert_eq(get_path_candidates(file="sh", path=":"), [])
+  assert_eq(get_path_candidates(file="sh", path=":/bin"), [b"/bin/sh"])
+  assert_eq(get_path_candidates(file="sh", path="/bin:"), [b"/bin/sh"])
+  assert_eq(get_path_candidates(file="sh", path="/usr/bin::/bin"), [
+    b"/usr/bin/sh", b"/bin/sh",
+  ])
+  assert_eq(get_path_candidates(file="sh", path=".:/bin"), [b"./sh", b"/bin/sh"])
 }

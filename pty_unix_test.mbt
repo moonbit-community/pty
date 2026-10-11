@@ -148,6 +148,39 @@ async test "@pty.spawn raises ENOENT for a non-existent program" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "@pty.spawn does not resolve a bare name against cwd through empty PATH entries" {
+  @async.with_task_group() <| group => {
+    with_tmpdir(prefix="moonbit-pty-empty-path") <| tmpdir => {
+      // An executable sitting in `cwd` under the bare name being spawned:
+      // reading an empty PATH entry as the current directory would run it.
+      @async/fs.write_file(
+        "\{tmpdir}/prog",
+        b"#!/bin/sh\necho RAN_FROM_CWD\n",
+        create_mode=CreateNew,
+        permission=0o755,
+      )
+      for path in ["", ":", ":/nonexistent", "/nonexistent:"] {
+        try
+          @pty.spawn(
+            group,
+            "prog",
+            [],
+            cwd=tmpdir,
+            extra_env=Map([("PATH", path)]),
+          )
+        catch {
+          @os_error.OSError(ENOENT, ..) => ()
+          error => raise error
+        } noraise {
+          _ => fail("expected spawn with PATH=\"\{path}\" to raise ENOENT")
+        }
+      }
+    }
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "@pty.spawn raises EACCES for a file without execute permission" {
   @async.with_task_group() <| group => {
     with_tmpdir(prefix="moonbit-pty-noexec") <| tmpdir => {
