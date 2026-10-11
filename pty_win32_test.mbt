@@ -187,3 +187,29 @@ async test "@pty.Pty::resize raises EBADF after the group closed the pty" {
     _ => fail("expected resize on a closed pty to raise EBADF")
   }
 }
+
+///|
+// Guards the ConPTY teardown order recorded in docs/invariants.md: the child
+// floods the pseudoconsole and nobody reads the output pipe, so by the time
+// the group body returns the pipe is full and the pseudoconsole is blocked
+// writing to it. Before Windows 11 24H2 a `ClosePseudoConsole` issued in
+// that state never returns, and it runs on the event-loop thread, so no
+// timeout can fire either: the failure mode of this test is the CI job's
+// `timeout-minutes`, not an assertion. The bound covers the 5000ms grace
+// period plus the hard kill.
+#cfg(platform="windows")
+async test "@pty.spawn cancellation ends a child that floods an unread pty" {
+  let completed = @async.with_timeout_opt(15000) <| () => {
+    @async.with_task_group() <| group => {
+      @pty.spawn(
+        group,
+        "cmd",
+        ["/c", "for /L %i in (0,0,1) do @echo flooding the pseudoconsole"],
+        no_wait=true,
+      )
+      |> ignore()
+      @async.sleep(1000)
+    }
+  }
+  assert_true(completed is Some(_))
+}
