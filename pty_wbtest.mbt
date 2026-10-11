@@ -42,3 +42,29 @@ async test "wait_pid_with: returns the child's exit status" {
   let pid = @async/process.spawn_orphan("sh", ["-c", "exit 7"])
   assert_eq(wait_pid_with(pid, () => ()), 7)
 }
+
+///|
+// Guards what `with_pty` exists for: a session must give its descriptors
+// back when it ends, not when some enclosing task group does. The kernel
+// hands out the lowest free descriptor number, so sessions that release
+// their pty keep getting (nearly) the same number back, while a leak climbs
+// by at least one per session — 50 sessions against a bound of 8 leaves no
+// room to confuse the two.
+#cfg(not(platform="windows"))
+async test "with_pty: sessions do not accumulate file descriptors" {
+  async fn session_fd() -> Int {
+    with_pty("true", [], pty => {
+      pty.read_all() |> ignore()
+      pty.primary.fd
+    })
+  }
+  let first = session_fd()
+  let mut highest = first
+  for _ in 0..<50 {
+    let fd = session_fd()
+    if fd > highest {
+      highest = fd
+    }
+  }
+  assert_true(highest - first < 8)
+}

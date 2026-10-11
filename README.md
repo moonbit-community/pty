@@ -30,6 +30,33 @@ By default the task group waits for the child to exit. Pass `no_wait=true`
 (same semantics as `@async/process.spawn`) to let the group exit as soon as
 its own tasks are done, terminating the child instead of waiting for it.
 
+## Scoped sessions: `with_pty`
+
+`spawn` keeps the pty open until its task group exits, so a long-lived group
+that spawns many ptys accumulates their file descriptors. When a pty's
+lifetime is a lexical scope, use `with_pty` instead: it takes the same
+arguments as `spawn` (minus `group` and `no_wait`) and releases the pty as
+soon as the callback is done.
+
+```moonbit
+let (text, exit_code) = @pty.with_pty("sh", ["-c", "echo hello"], pty => {
+  let text = pty.read_all().text()
+  (text, pty.wait())
+})
+```
+
+If the child is still running when the callback returns, raises, or is
+cancelled, it is hung up, given the 5 s grace period, then killed; `with_pty`
+returns once it has been reaped. Call `pty.wait()` inside the callback to let
+the child finish on its own.
+
+Do not let the `Pty` escape the callback: it is closed afterwards, and a task
+still blocked reading it is not woken up. Tasks that read or write
+concurrently belong in a task group opened inside the callback.
+
+Use `spawn` when the pty must outlive the code that created it, or should
+share the lifetime of a task group you already have.
+
 ## Drain the pty concurrently
 
 Do **not** `wait()` first and `read()` afterwards. A pty master is a bounded

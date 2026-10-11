@@ -66,3 +66,53 @@ async fn wait_pid_with(
     waiter.wait()
   }
 }
+
+///|
+/// Spawns a child process attached to a new pseudo-terminal, runs `f` with
+/// its `Pty`, and releases the pty when `f` is done.
+///
+/// The pty lives exactly as long as `f`. When `f` returns, raises, or is
+/// cancelled, the terminal is closed; a child that is still running is hung
+/// up, given the 5 s grace period, then killed, and `with_pty` only returns
+/// once it has been reaped. Call `Pty::wait` inside `f` to let the child
+/// finish on its own and to get its exit code.
+///
+/// Prefer this over `spawn` whenever the pty's lifetime is a lexical scope:
+/// `spawn` keeps the pty open until its task group exits, so a long-lived
+/// group that spawns many ptys accumulates their file descriptors.
+///
+/// `rows`, `cols`, `file`, `args`, `extra_env`, `inherit_env` and `cwd` are
+/// those of `spawn`, with the same defaults.
+///
+/// Do not let the `Pty` escape `f`: it is closed afterwards, and a task
+/// still blocked reading it is not woken up. Tasks that read or write
+/// concurrently belong in a task group opened inside `f`.
+pub async fn[T] with_pty(
+  rows? : Int,
+  cols? : Int,
+  file : StringView,
+  args : ArrayView[StringView],
+  extra_env? : Map[String, String],
+  inherit_env? : Bool,
+  cwd? : StringView,
+  f : async (Pty) -> T,
+) -> T {
+  // `no_wait=true`: once `f` is done nobody reads the terminal any more, so
+  // waiting for the child could block forever on a full pty queue. The group
+  // cancels the wait task instead, which runs the usual cancellation cleanup.
+  @async.with_task_group() <| group => {
+    f(
+      spawn(
+        group,
+        rows?,
+        cols?,
+        file,
+        args,
+        extra_env?,
+        inherit_env?,
+        cwd?,
+        no_wait=true,
+      ),
+    )
+  }
+}

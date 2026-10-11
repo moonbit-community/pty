@@ -10,6 +10,8 @@ import {
 // Values
 pub async fn[X] spawn(@async.TaskGroup[X], rows? : Int, cols? : Int, StringView, ArrayView[StringView], extra_env? : Map[String, String], inherit_env? : Bool, cwd? : StringView, no_wait? : Bool) -> Pty
 
+pub async fn[T] with_pty(rows? : Int, cols? : Int, StringView, ArrayView[StringView], extra_env? : Map[String, String], inherit_env? : Bool, cwd? : StringView, async (Pty) -> T) -> T
+
 // Errors
 
 // Types and methods
