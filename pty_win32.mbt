@@ -168,10 +168,13 @@ pub async fn[X] spawn(
   let session : FixedArray[@handle.Handle] = [invalid_handle, invalid_handle]
   let pid = pty_win32_spawn(hpc, session, cmd~, app~, env~, cwd~)
   if pid < 0 {
+    // Read the error before the cleanup below, like the unix side does: the
+    // closes are free to overwrite the thread's last-error value.
+    let errno = @os_error.get_errno()
     input_writer.close()
     output_reader.close()
     hpc.close()
-    raise @os_error.OSError(@os_error.get_errno(), context="@pty.spawn")
+    raise @os_error.OSError(errno, context="@pty.spawn")
   }
   guard! session is [process_handle, job_handle]
   let process = Process(process_handle)
