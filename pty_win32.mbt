@@ -198,6 +198,13 @@ pub async fn[X] spawn(
       // that makes the cleanup run at all.
       @async.protect_from_cancel() <| () => {
         wait_pid_with(pid) <| () => {
+          // Our end of the output pipe goes first. Before Windows 11 24H2
+          // `ClosePseudoConsole` waits for the pseudoconsole to exit, and
+          // the pseudoconsole blocks on a full output pipe that nobody
+          // reads any more: closing the HPCON first can hang right here, on
+          // the event-loop thread (docs/invariants.md). The group defer
+          // closes the pipe again; `RawFdStream::close` is idempotent.
+          output_reader.close()
           close_pseudo_console()
           // Grace period before the hard kill; matches the ~5s the OS
           // itself grants on CTRL_CLOSE_EVENT. Keep in sync with the

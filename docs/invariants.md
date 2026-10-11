@@ -74,6 +74,21 @@ rationale. Nothing here is pending work; it is documented so it doesn't get
   std handles into the child and its output bypasses the ConPTY.
 - The ConPTY output pipe only reaches EOF after `ClosePseudoConsole`, so
   the wait task must close the HPCON as soon as `wait_pid` returns.
+- The cancellation cleanup closes our end of the output pipe *before*
+  `ClosePseudoConsole` (decided 2026-10-11). Before Windows 11 24H2 (build
+  26100) `ClosePseudoConsole` waits for the pseudoconsole to exit, and the
+  pseudoconsole blocks writing to a full output pipe; once the caller has
+  stopped reading, closing the HPCON first can wait forever. The call runs on
+  the event-loop thread, so nothing else runs either — not the grace-period
+  kill, not a timeout. Microsoft's documentation requires closing the output
+  pipe first or reading it until the call returns. From 24H2 on the call
+  returns immediately, so a runner that new cannot catch a regression: the
+  `windows-2022` CI job exists for this, and the flooding-child test in
+  `pty_win32_test.mbt` fails there by running into the job's
+  `timeout-minutes`. The normal exit path is deliberately different — it
+  keeps the pipe open, because the caller may still read up to the EOF that
+  only arrives after `ClosePseudoConsole` — and therefore still depends on
+  the caller draining the pty on those Windows versions.
 - `ClosePseudoConsole` must never run twice on the same HPCON (heap
   corruption, 0xC0000374) — closing is guarded by `hpc : Ref[PseudoConsole?]`.
 - `CreateProcessW` mutates the command-line buffer in place; always pass a
