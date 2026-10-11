@@ -74,21 +74,29 @@ rationale. Nothing here is pending work; it is documented so it doesn't get
   std handles into the child and its output bypasses the ConPTY.
 - The ConPTY output pipe only reaches EOF after `ClosePseudoConsole`, so
   the wait task must close the HPCON as soon as `wait_pid` returns.
+- `ClosePseudoConsole` never runs on the event-loop thread: it goes through
+  `moonbit_pty_win32_close_pseudo_console`, which makes the call on a
+  short-lived helper thread (decided 2026-10-11). Before Windows 11 24H2
+  (build 26100) the call waits for the pseudoconsole to exit, and the
+  pseudoconsole cannot exit until its remaining output has been read. On the
+  event-loop thread that wait stops every reader task, so a pseudoconsole
+  holding more output than the pipe can take never finishes, and nothing
+  else runs either — not the grace-period kill, not a timeout. Microsoft's
+  documentation says not to make the call on the thread that reads the
+  output pipe; with an event loop, that is this thread. From 24H2 on the
+  call returns immediately, which is the behavior the helper thread gives
+  every version. The thread is not joined: it ends when the pseudoconsole
+  does, at the latest when our ends of the pipes are closed.
 - The cancellation cleanup closes our end of the output pipe *before*
-  `ClosePseudoConsole` (decided 2026-10-11). Before Windows 11 24H2 (build
-  26100) `ClosePseudoConsole` waits for the pseudoconsole to exit, and the
-  pseudoconsole blocks writing to a full output pipe; once the caller has
-  stopped reading, closing the HPCON first can wait forever. The call runs on
-  the event-loop thread, so nothing else runs either — not the grace-period
-  kill, not a timeout. Microsoft's documentation requires closing the output
-  pipe first or reading it until the call returns. From 24H2 on the call
-  returns immediately, so a runner that new cannot catch a regression: the
-  `windows-2022` CI job exists for this, and the flooding-child test in
-  `pty_win32_test.mbt` fails there by running into the job's
-  `timeout-minutes`. The normal exit path is deliberately different — it
-  keeps the pipe open, because the caller may still read up to the EOF that
-  only arrives after `ClosePseudoConsole` — and therefore still depends on
-  the caller draining the pty on those Windows versions.
+  closing the HPCON (decided 2026-10-11). By then nobody reads the pipe, and
+  before 24H2 a pseudoconsole blocked on a full pipe never finishes closing.
+  The normal exit path cannot do the same — the caller may still read up to
+  the EOF that only arrives after `ClosePseudoConsole` — which is why the
+  call had to leave the event-loop thread instead.
+- A runner on 24H2 or later cannot catch a regression in either of the two
+  rules above: the `windows-2022` CI job exists for this. The screenful and
+  flooding-child tests in `pty_win32_test.mbt` fail there by running into
+  the job's `timeout-minutes`, not by an assertion.
 - `ClosePseudoConsole` must never run twice on the same HPCON (heap
   corruption, 0xC0000374) — closing is guarded by `hpc : Ref[PseudoConsole?]`.
 - `CreateProcessW` mutates the command-line buffer in place; always pass a
