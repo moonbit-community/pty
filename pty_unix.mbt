@@ -14,8 +14,8 @@
 struct Pty {
   closed : Ref[Bool]
   primary : @async/raw_fd.RawFdStream
-  pid : Int
-  result : @async.Task[Int]
+  pid : Int32
+  result : @async.Task[Int32]
 }
 
 ///|
@@ -23,9 +23,9 @@ struct Pty {
 #borrow(pty)
 extern "c" fn pty_unix_open(
   pty : FixedArray[@handle.Handle],
-  rows~ : Int,
-  cols~ : Int,
-) -> Int = "moonbit_pty_unix_open"
+  rows~ : Int32,
+  cols~ : Int32,
+) -> Int32 = "moonbit_pty_unix_open"
 
 ///|
 #cfg(not(platform="windows"))
@@ -37,18 +37,18 @@ extern "c" fn pty_unix_spawn(
   argv : FixedArray[Bytes],
   envp : FixedArray[Bytes],
   cwd : Bytes,
-) -> Int = "moonbit_pty_unix_spawn"
+) -> Int32 = "moonbit_pty_unix_spawn"
 
 ///|
 #cfg(not(platform="windows"))
-extern "c" fn pty_unix_kill_group(pid : Int) -> Int = "moonbit_pty_unix_kill_group"
+extern "c" fn pty_unix_kill_group(pid : Int32) -> Int32 = "moonbit_pty_unix_kill_group"
 
 ///|
 #cfg(not(platform="windows"))
 #borrow(fds)
 extern "c" fn pty_unix_create_error_pipe(
   fds : FixedArray[@handle.Handle],
-) -> Int = "moonbit_pty_unix_create_error_pipe"
+) -> Int32 = "moonbit_pty_unix_create_error_pipe"
 
 ///|
 /// Spawns a child process attached to a new pseudo-terminal and returns the
@@ -78,12 +78,12 @@ extern "c" fn pty_unix_create_error_pipe(
 #cfg(not(platform="windows"))
 pub async fn[X] spawn(
   group : @async.TaskGroup[X],
-  rows? : Int = 24,
-  cols? : Int = 80,
+  rows~ : Int32 = 24,
+  cols~ : Int32 = 80,
   file : StringView,
   args : ArrayView[StringView],
-  extra_env? : Map[String, String] = Map([]),
-  inherit_env? : Bool = true,
+  extra_env~ : Map[String, String] = Map([]),
+  inherit_env~ : Bool = true,
   cwd? : StringView,
   no_wait? : Bool,
 ) -> Pty {
@@ -243,14 +243,14 @@ pub async fn[X] spawn(
 /// a few hundred milliseconds after the child exits. Read concurrently
 /// while waiting; reading late yields a clean but empty EOF.
 #cfg(not(platform="windows"))
-pub async fn Pty::wait(self : Pty) -> Int {
+pub async fn Pty::wait(self : Pty) -> Int32 {
   return self.result.wait()
 }
 
 ///|
 /// The process ID of the spawned child process.
 #cfg(not(platform="windows"))
-pub fn Pty::pid(self : Pty) -> Int {
+pub fn Pty::pid(self : Pty) -> Int32 {
   self.pid
 }
 
@@ -263,16 +263,16 @@ pub impl @async/io.Reader for Pty with fn _get_internal_buffer(self : Pty) -> @a
 
 ///|
 #cfg(not(platform="windows"))
-const EIO : Int = 5
+const EIO : Int32 = 5
 
 ///|
 #cfg(not(platform="windows"))
 pub impl @async/io.Reader for Pty with fn _direct_read(
   self : Pty,
   buf : FixedArray[Byte],
-  offset~ : Int,
-  max_len~ : Int,
-) -> Int {
+  offset~ : Int32,
+  max_len~ : Int32,
+) -> Int32 {
   @async/io.Reader::_direct_read(self.primary, buf, offset~, max_len~) catch {
     @os_error.OSError(EIO, ..) => 0
     error => raise error
@@ -284,9 +284,9 @@ pub impl @async/io.Reader for Pty with fn _direct_read(
 pub impl @async/io.Writer for Pty with fn write_once(
   self : Pty,
   buf : Bytes,
-  offset~ : Int,
-  len~ : Int,
-) -> Int {
+  offset~ : Int32,
+  len~ : Int32,
+) -> Int32 {
   self.primary.write_once(buf, offset~, len~)
 }
 
@@ -295,13 +295,13 @@ pub impl @async/io.Writer for Pty with fn write_once(
 #borrow(primary)
 extern "c" fn pty_resize(
   primary : @handle.Handle,
-  rows~ : Int,
-  cols~ : Int,
-) -> Int = "moonbit_pty_resize"
+  rows~ : Int32,
+  cols~ : Int32,
+) -> Int32 = "moonbit_pty_resize"
 
 ///|
 #cfg(not(platform="windows"))
-const EBADF : Int = 9
+const EBADF : Int32 = 9
 
 ///|
 /// Resizes the child's terminal, in characters.
@@ -311,8 +311,8 @@ const EBADF : Int = 9
 #cfg(not(platform="windows"))
 pub fn Pty::resize(
   self : Pty,
-  rows~ : Int,
-  cols~ : Int,
+  rows~ : Int32,
+  cols~ : Int32,
 ) -> Unit raise @os_error.OSError {
   if self.closed.val {
     raise OSError(EBADF, context="@pty.Pty::resize")

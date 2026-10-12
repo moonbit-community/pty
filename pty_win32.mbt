@@ -7,9 +7,9 @@ let invalid_handle : @handle.Handle = @handle.Handle::invalid()
 #borrow(pty)
 extern "c" fn pty_win32_open(
   pty : FixedArray[@handle.Handle],
-  rows~ : Int,
-  cols~ : Int,
-) -> Int = "moonbit_pty_win32_open"
+  rows~ : Int32,
+  cols~ : Int32,
+) -> Int32 = "moonbit_pty_win32_open"
 
 ///|
 #cfg(platform="windows")
@@ -21,7 +21,7 @@ extern "c" fn pty_win32_spawn(
   app~ : String,
   env~ : String,
   cwd~ : String,
-) -> Int = "moonbit_pty_win32_spawn"
+) -> Int32 = "moonbit_pty_win32_spawn"
 
 ///|
 #cfg(platform="windows")
@@ -49,13 +49,13 @@ struct Pty {
   input_writer : @async/raw_fd.RawFdStream
   output_reader : @async/raw_fd.RawFdStream
   hpc : Ref[PseudoConsole?]
-  pid : Int
-  result : @async.Task[Int]
+  pid : Int32
+  result : @async.Task[Int32]
 }
 
 ///|
 #cfg(platform="windows")
-const ERROR_FILE_NOT_FOUND : Int = 2
+const ERROR_FILE_NOT_FOUND : Int32 = 2
 
 ///|
 /// Spawns a child process attached to a new pseudo-terminal and returns the
@@ -85,12 +85,12 @@ const ERROR_FILE_NOT_FOUND : Int = 2
 #cfg(platform="windows")
 pub async fn[X] spawn(
   group : @async.TaskGroup[X],
-  rows? : Int = 24,
-  cols? : Int = 80,
+  rows~ : Int32 = 24,
+  cols~ : Int32 = 80,
   file : StringView,
   args : ArrayView[StringView],
-  extra_env? : Map[String, String] = Map([]),
-  inherit_env? : Bool = true,
+  extra_env~ : Map[String, String] = Map([]),
+  inherit_env~ : Bool = true,
   cwd? : StringView,
   no_wait? : Bool,
 ) -> Pty {
@@ -231,16 +231,16 @@ pub async fn[X] spawn(
 
 ///|
 #cfg(platform="windows")
-const ERROR_BROKEN_PIPE : Int = 109
+const ERROR_BROKEN_PIPE : Int32 = 109
 
 ///|
 #cfg(platform="windows")
 pub impl @async/io.Reader for Pty with fn _direct_read(
   self : Pty,
   buf : FixedArray[Byte],
-  offset~ : Int,
-  max_len~ : Int,
-) -> Int {
+  offset~ : Int32,
+  max_len~ : Int32,
+) -> Int32 {
   @async/io.Reader::_direct_read(self.output_reader, buf, offset~, max_len~) catch {
     @os_error.OSError(ERROR_BROKEN_PIPE, ..) => 0
     error => raise error
@@ -259,9 +259,9 @@ pub impl @async/io.Reader for Pty with fn _get_internal_buffer(self : Pty) -> @a
 pub impl @async/io.Writer for Pty with fn write_once(
   self : Pty,
   buf : Bytes,
-  offset~ : Int,
-  len~ : Int,
-) -> Int {
+  offset~ : Int32,
+  len~ : Int32,
+) -> Int32 {
   self.input_writer.write_once(buf, offset~, len~)
 }
 
@@ -270,9 +270,9 @@ pub impl @async/io.Writer for Pty with fn write_once(
 #borrow(hpc)
 extern "c" fn PseudoConsole::resize(
   hpc : PseudoConsole,
-  rows~ : Int,
-  cols~ : Int,
-) -> Int = "moonbit_pty_win32_resize"
+  rows~ : Int32,
+  cols~ : Int32,
+) -> Int32 = "moonbit_pty_win32_resize"
 
 ///|
 /// Resizes the child's terminal, in characters.
@@ -282,8 +282,8 @@ extern "c" fn PseudoConsole::resize(
 #cfg(platform="windows")
 pub fn Pty::resize(
   self : Pty,
-  rows~ : Int,
-  cols~ : Int,
+  rows~ : Int32,
+  cols~ : Int32,
 ) -> Unit raise @os_error.OSError {
   guard self.hpc.val is Some(hpc) else {
     raise @os_error.OSError(9, context="@pty.Pty::resize")
@@ -303,7 +303,7 @@ pub fn Pty::resize(
 /// a few hundred milliseconds after the child exits. Read concurrently
 /// while waiting; reading late yields a clean but empty EOF.
 #cfg(platform="windows")
-pub async fn Pty::wait(self : Pty) -> Int {
+pub async fn Pty::wait(self : Pty) -> Int32 {
   return self.result.wait()
 }
 
@@ -314,7 +314,7 @@ priv struct JobObject(@handle.Handle)
 ///|
 #cfg(platform="windows")
 #borrow(job)
-extern "c" fn JobObject::terminate(job : JobObject, exit_code : Int) -> Bool = "TerminateJobObject"
+extern "c" fn JobObject::terminate(job : JobObject, exit_code : Int32) -> Bool = "TerminateJobObject"
 
 ///|
 #cfg(platform="windows")
@@ -335,7 +335,7 @@ priv struct Process(@handle.Handle)
 ///|
 #cfg(platform="windows")
 #borrow(process)
-extern "c" fn Process::terminate(process : Process, exit_code : UInt) -> Bool = "TerminateProcess"
+extern "c" fn Process::terminate(process : Process, exit_code : UInt32) -> Bool = "TerminateProcess"
 
 ///|
 #cfg(platform="windows")
@@ -346,7 +346,7 @@ fn Process::close(self : Process) -> Unit {
 ///|
 /// The process ID of the spawned child process.
 #cfg(platform="windows")
-pub fn Pty::pid(self : Pty) -> Int {
+pub fn Pty::pid(self : Pty) -> Int32 {
   self.pid
 }
 

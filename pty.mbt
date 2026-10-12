@@ -53,10 +53,10 @@ pub extend Pty with @async/io.Reader::{_direct_read, _get_internal_buffer}
 // supplies it, so silence unused_optional_argument.
 #warnings("-unused_optional_argument")
 async fn wait_pid_with(
-  pid : Int,
+  pid : Int32,
   background : async () -> Unit,
-  on_waiter? : (@async.Task[Int]) -> Unit,
-) -> Int {
+  on_waiter? : (@async.Task[Int32]) -> Unit,
+) -> Int32 {
   @async.with_task_group() <| g => {
     let waiter = g.spawn(() => @async/process.wait_pid(pid))
     if on_waiter is Some(hook) {
@@ -90,8 +90,8 @@ async fn wait_pid_with(
 /// write the pty concurrently, open a task group for them and `spawn` the
 /// pty into that group directly, rather than nesting one inside `with_pty`.
 pub async fn[T] with_pty(
-  rows? : Int,
-  cols? : Int,
+  rows? : Int32,
+  cols? : Int32,
   file : StringView,
   args : ArrayView[StringView],
   extra_env? : Map[String, String],

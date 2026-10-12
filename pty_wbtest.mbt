@@ -13,7 +13,7 @@ async test "wait_pid_with: waiter cancelled by the runtime raises WaitedTaskAlre
   // Outlives the cancellation; nobody reaps it afterwards and the zombie is
   // collected when the test binary exits.
   let pid = @async/process.spawn_orphan("sleep", ["1"])
-  let waiter : Ref[@async.Task[Int]?] = Ref(None)
+  let waiter : Ref[@async.Task[Int32]?] = Ref(None)
   try
     wait_pid_with(
       pid,
@@ -52,7 +52,7 @@ async test "wait_pid_with: returns the child's exit status" {
 // room to confuse the two.
 #cfg(not(platform="windows"))
 async test "with_pty: sessions do not accumulate file descriptors" {
-  async fn session_fd() -> Int {
+  async fn session_fd() -> Int32 {
     with_pty("true", []) <| pty => {
       pty.read_all() |> ignore()
       pty.primary.fd
