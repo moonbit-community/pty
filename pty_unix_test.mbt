@@ -20,15 +20,15 @@ async fn[T] with_tmpdir(prefix~ : StringView, f : async (String) -> T) -> T {
 
 ///|
 #cfg(not(platform="windows"))
-const ENOENT : Int = 2
+const ENOENT : Int32 = 2
 
 ///|
 #cfg(not(platform="windows"))
-const EACCES : Int = 13
+const EACCES : Int32 = 13
 
 ///|
 #cfg(not(platform="windows"))
-const EBADF : Int = 9
+const EBADF : Int32 = 9
 
 ///|
 #cfg(not(platform="windows"))

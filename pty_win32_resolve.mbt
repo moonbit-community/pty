@@ -87,15 +87,15 @@ fn get_path_candidates(
   match (file, cwd) {
     (
       ['\\' | '/', '\\' | '/', ..]
-      | ['A'..='Z' | 'a'..='z', ':', '\\' | '/', ..],
+      | ['A'..<='Z' | 'a'..<='z', ':', '\\' | '/', ..],
       _,
     ) => [file]
-    (['\\' | '/', ..], ['A'..='Z' | 'a'..='z' as drive, ..]) =>
+    (['\\' | '/', ..], ['A'..<='Z' | 'a'..<='z' as drive, ..]) =>
       ["\{drive}:\{file}"]
     (['\\' | '/', ..], _) => [file]
     (
-      ['A'..='Z' | 'a'..='z' as file_drive, ':', .. relative_path],
-      ['A'..='Z' | 'a'..='z' as current_drive, ..],
+      ['A'..<='Z' | 'a'..<='z' as file_drive, ':', .. relative_path],
+      ['A'..<='Z' | 'a'..<='z' as current_drive, ..],
     ) =>
       if file_drive
         .to_ascii_uppercase()
@@ -104,7 +104,7 @@ fn get_path_candidates(
       } else {
         [get_full_path_name(file)]
       }
-    (['A'..='Z' | 'a'..='z', ':', ..], _) => [get_full_path_name(file)]
+    (['A'..<='Z' | 'a'..<='z', ':', ..], _) => [get_full_path_name(file)]
     _ => {
       if file.contains_any(chars="/\\") {
         return [join_path(cwd, file)]
@@ -118,7 +118,7 @@ fn get_path_candidates(
 #cfg(platform="windows")
 test "get_path_candidates" {
   let cwd = get_full_path_name(".")
-  guard cwd is ['A'..='Z' | 'a'..='z' as drive, ..] else {
+  guard cwd is ['A'..<='Z' | 'a'..<='z' as drive, ..] else {
     fail("get_path_candidates: unable to parse current drive")
   }
   // A drive letter that is NOT the parent's current drive, for cross-drive

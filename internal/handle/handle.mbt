@@ -11,11 +11,11 @@ pub extend Handle with Eq::{equal, not_equal}
 
 ///|
 #cfg(platform="windows")
-extern "c" fn handle_close(handle : Handle) -> Int = "CloseHandle"
+extern "c" fn handle_close(handle : Handle) -> Int32 = "CloseHandle"
 
 ///|
 #cfg(not(platform="windows"))
-extern "c" fn handle_close(handle : Handle) -> Int = "close"
+extern "c" fn handle_close(handle : Handle) -> Int32 = "close"
 
 ///|
 /// Closes the underlying file descriptor (unix) or handle (win32).

@@ -1,6 +1,6 @@
 ///|
 #cfg(platform="windows")
-const ERROR_FILE_NOT_FOUND : Int = 2
+const ERROR_FILE_NOT_FOUND : Int32 = 2
 
 ///|
 // `CreateProcessW` refuses a file that resolves but is not a valid executable
@@ -8,16 +8,16 @@ const ERROR_FILE_NOT_FOUND : Int = 2
 // is ERROR_BAD_EXE_FORMAT (193); Windows 11 was observed returning
 // ERROR_EXE_MACHINE_TYPE_MISMATCH (216) for the same text-file fixture.
 #cfg(platform="windows")
-const ERROR_BAD_EXE_FORMAT : Int = 193
+const ERROR_BAD_EXE_FORMAT : Int32 = 193
 
 ///|
 #cfg(platform="windows")
-const ERROR_EXE_MACHINE_TYPE_MISMATCH : Int = 216
+const ERROR_EXE_MACHINE_TYPE_MISMATCH : Int32 = 216
 
 ///|
 // `Pty::resize` raises errno EBADF once the wait task has closed the HPCON.
 #cfg(platform="windows")
-const EBADF : Int = 9
+const EBADF : Int32 = 9
 
 ///|
 // The win32 analog of the unix "generate fixtures at test time" policy:
