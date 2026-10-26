@@ -8,25 +8,25 @@ import {
 }
 
 // Values
-pub async fn[X] spawn(@async.TaskGroup[X], rows? : Int, cols? : Int, StringView, ArrayView[StringView], extra_env? : Map[String, String], inherit_env? : Bool, cwd? : StringView, no_wait? : Bool) -> Pty
+pub async fn[X] spawn(@async.TaskGroup[X], rows? : Int32, cols? : Int32, StringView, ArrayView[StringView], extra_env? : Map[String, String], inherit_env? : Bool, cwd? : StringView, no_wait? : Bool) -> Pty
 
-pub async fn[T] with_pty(rows? : Int, cols? : Int, StringView, ArrayView[StringView], extra_env? : Map[String, String], inherit_env? : Bool, cwd? : StringView, async (Pty) -> T) -> T
+pub async fn[T] with_pty(rows? : Int32, cols? : Int32, StringView, ArrayView[StringView], extra_env? : Map[String, String], inherit_env? : Bool, cwd? : StringView, async (Pty) -> T) -> T
 
 // Errors
 
 // Types and methods
 type Pty
-pub async fn Pty::drop(Self, Int) -> Int
-pub fn Pty::pid(Self) -> Int
-pub async fn Pty::read(Self, FixedArray[Byte], offset? : Int, max_len? : Int) -> Int
+pub async fn Pty::drop(Self, Int32) -> Int32
+pub fn Pty::pid(Self) -> Int32
+pub async fn Pty::read(Self, FixedArray[Byte], offset? : Int32, max_len? : Int32) -> Int32
 pub async fn Pty::read_all(Self) -> &@io.Data
-pub async fn Pty::read_exactly(Self, Int) -> Bytes
-pub async fn Pty::read_some(Self, max_len? : Int) -> Bytes?
+pub async fn Pty::read_exactly(Self, Int32) -> Bytes
+pub async fn Pty::read_some(Self, max_len? : Int32) -> Bytes?
 pub async fn Pty::read_until(Self, StringView) -> String?
-pub fn Pty::resize(Self, rows~ : Int, cols~ : Int) -> Unit raise @os_error.OSError
-pub async fn Pty::wait(Self) -> Int
+pub fn Pty::resize(Self, rows~ : Int32, cols~ : Int32) -> Unit raise @os_error.OSError
+pub async fn Pty::wait(Self) -> Int32
 pub async fn Pty::write(Self, &@io.Data) -> Unit
-pub async fn Pty::write_once(Self, Bytes, offset~ : Int, len~ : Int) -> Int
+pub async fn Pty::write_once(Self, Bytes, offset~ : Int32, len~ : Int32) -> Int32
 pub async fn Pty::write_reader(Self, &@io.Reader) -> Unit
 pub impl @io.Reader for Pty
 pub impl @io.Writer for Pty

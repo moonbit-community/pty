@@ -80,29 +80,10 @@ moonbit_pty_unix_set_termios(struct termios *t) {
   cfsetospeed(t, B38400);
 }
 
-#if defined(__APPLE__)
-
-/** We use `__fork` to skip pthread_atfork handlers. */
-extern pid_t
-__fork(void) __attribute__((weak_import));
-
-static inline pid_t
-moonbit_pty_unix_fork(void) {
-  if (&__fork == NULL) {
-    errno = ENOSYS;
-    return -1;
-  }
-  return __fork();
-}
-
-#else
-
 static inline pid_t
 moonbit_pty_unix_fork(void) {
   return fork();
 }
-
-#endif
 
 static inline int32_t
 moonbit_pty_unix_dupfd_cloexec_3(int32_t fd) {
