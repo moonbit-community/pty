@@ -18,14 +18,7 @@ fn StringBuilder::write_arg_with_windows_escape(
   // Do not add double quotes if it is unnecessary to do so.
   // This helps with simple cases when the program is not using C argv syntax,
   // such as `rundll32.exe`.
-  let need_quote = for char in arg {
-    if char is (' ' | '\t' | '"') {
-      break true
-    }
-  } nobreak {
-    false
-  }
-  if !need_quote {
+  if !arg.contains_any(chars=" \t\"") {
     builder.write_stringview(arg)
     return
   }
