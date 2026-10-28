@@ -131,13 +131,9 @@ pub async fn[X] spawn(
       @encoding/utf8.encode(args[i - 1])
     }
   })
-  let envp = {
-    let envp = []
-    for k, v in env {
-      envp.push("\{k}=\{v}")
-    }
-    FixedArray::makei(envp.length(), i => @encoding/utf8.encode(envp[i]))
-  }
+  let envp : FixedArray[Bytes] = [
+    for k, v in env => @encoding/utf8.encode("\{k}=\{v}")
+  ]
   let cwd = if cwd is Some(cwd) { @encoding/utf8.encode(cwd) } else { b"" }
   // The pty is owned by this function until a `Pty` exists to hang the group
   // defer off, so every failure below has to close both ends itself. The

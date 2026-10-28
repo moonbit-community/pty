@@ -110,8 +110,7 @@ pub async fn[X] spawn(
   }
   let env = {
     let sb = StringBuilder()
-    for _, kv in env_map {
-      let (k, v) = kv
+    for _, (k, v) in env_map {
       sb <+ "\{k}=\{v}\u{0000}"
     }
     sb.write_char('\u{000}')
