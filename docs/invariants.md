@@ -111,3 +111,34 @@ rationale. Nothing here is pending work; it is documented so it doesn't get
   error-path tests in `pty_win32_test.mbt`. `CreateProcessW` on a text file
   named `foo.exe` returns ERROR_EXE_MACHINE_TYPE_MISMATCH (216) on Windows 11,
   not the classic ERROR_BAD_EXE_FORMAT (193) — the test accepts both.
+
+## Wasm sidecar
+
+- The wasm backend is a separate package (`wasm/`, published as
+  `moonbit-community/pty/wasm`), not a `#cfg` arm of the root package:
+  `moonbitlang/async/raw_fd` declares native-only support, and a package whose
+  dependency graph reaches it cannot be built for wasm at all. Imports are
+  static, so `#cfg` cannot remove one — moving the wasm implementation into
+  the root package fails with "Selected backend 'wasm' is incompatible with
+  the dependency graph".
+- `sidecar/sidecar.c` keeps the native backends' 5 s grace period
+  (`GRACE_PERIOD_MS`). It is a third copy of that number (`pty_unix.mbt`,
+  `pty_win32.mbt`, `sidecar.c`) and all three have to change together.
+- The PATH resolution rule also exists twice: `get_path_candidates` in
+  `pty_unix.mbt` (native unix) and in `internal/path` (wasm). They cannot
+  share a package — the native package is not importable from a wasm package,
+  and a shared package imported by the root package is an unused import on
+  Windows, which `moon check --deny-warn` rejects. Change both together; the
+  table in `pty_unix_test.mbt` is the normative set of cases.
+- The sidecar's stdout is non-blocking and every event frame is queued, so a
+  parent that stops reading events cannot block command processing; above
+  `OUT_HIGH_WATER` the pty itself is left unread, which is the backpressure.
+  Input is queued the same way, so a child that stops reading its input never
+  blocks the relay either.
+- The MoonBit side has exactly one reader (the output pump) and one writer
+  (the command pump) of the sidecar's pipes. `Pty::resize` is synchronous in
+  the public API and therefore queues a frame instead of writing one, which is
+  what keeps a resize ordered before a `write` issued after it.
+- The parent reaps the sidecar through the same spawned-waiter shape as
+  `wait_pid_with` in `pty.mbt` (`wasm/pty_wasm.mbt`), for the reason recorded
+  under "Both platforms".

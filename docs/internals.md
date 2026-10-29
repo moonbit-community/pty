@@ -142,11 +142,83 @@ is still made by `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`;
 `STARTF_USESTDHANDLES` only prevents inherited stdio redirection from
 competing with that attachment.
 
-### Windows argv encoding
+## Wasm: the sidecar backend
 
-Windows receives one command-line string rather than an argv array. The
-command line is built by quoting each argument so that `CommandLineToArgvW`
-(and the C runtime's argv parser) recovers it verbatim, then passed to
-`CreateProcessW` as UTF-16 alongside the resolved `lpApplicationName`.
-Non-ASCII executable paths, arguments, and working directories therefore do
-not depend on the process ANSI code page.
+A wasm build has no C FFI, and `moonbitlang/async/raw_fd` — the package the
+native backends use for asynchronous I/O on a pty master — supports the native
+target only. The root `pty` package therefore stays native-only: once
+`raw_fd` appears anywhere in its dependency graph, `moon check --target wasm`
+refuses the build ("incompatible with the dependency graph"), no matter which
+files are `#cfg`-ed out.
+
+The wasm backend is the separate package `moonbit-community/pty/wasm`, which
+offers the same public API (`spawn`, `with_pty`, `Pty`, `Pty::wait`,
+`Pty::pid`, `Pty::resize`, `@async/io.Reader`/`Writer`). Downstream code
+aliases it to `@pty`:
+
+```moonbit
+import {
+  "moonbit-community/pty/wasm" @pty,
+}
+```
+
+A wasm module cannot open a pseudo-terminal itself, but it can start a native
+process. One sidecar process per pty (`sidecar/sidecar.c`) owns the pty pair
+and the child, and relays both over its stdio pipes:
+
+1. The parent sends a SPAWN frame: the terminal size, the PATH candidates, the
+   child's argv and environment block, and its working directory.
+2. The sidecar opens `/dev/ptmx`, forks, and execs the child into the replica
+   (`setsid`, `TIOCSCTTY`, `dup2`, `chdir`) — the same startup sequence as the
+   native unix backend, including the ETXTBSY retry and the error pipe.
+3. It answers with HELLO carrying the child's pid, then forwards master output
+   as OUTPUT frames while accepting WRITE and RESIZE frames.
+4. When the child exits it drains the master, reports EXIT with the child's
+   exit code (or `-signal`), and exits.
+
+EOF on the command pipe — what the parent produces when its task group exits
+— hangs up the terminal, gives the child the same 5 s grace period the native
+backends give, kills its process group, and exits. The parent reaps the
+sidecar, so no zombie is left behind.
+
+Build the sidecar with any C compiler; it needs no MoonBit runtime:
+
+```sh
+cc -O2 -Wall -o sidecar/sidecar sidecar/sidecar.c
+PTY_SIDECAR="$PWD/sidecar/sidecar" moon test --target wasm
+```
+
+### Protocol
+
+Frames are `tag:u8 len:u32le payload`, spoken on the sidecar's stdin
+(commands) and stdout (events). Integers are little-endian `u32`.
+
+| direction | tag | payload |
+|---|---|---|
+| parent → sidecar | `0x01 SPAWN` | `rows, cols`, then three length-prefixed string arrays (`count`, then `len + bytes` each) for PATH candidates, argv, and `K=V` environment entries, then `cwdlen + bytes` (0 = inherit) |
+| parent → sidecar | `0x02 WRITE` | bytes for the pty master |
+| parent → sidecar | `0x03 RESIZE` | `rows, cols` |
+| parent → sidecar | `0x04 KILL` | optional signal, `SIGKILL` when absent (reserved: the wasm client always shuts down by closing the command pipe) |
+| sidecar → parent | `0x80 HELLO` | `version (1), pid` |
+| sidecar → parent | `0x81 OUTPUT` | bytes read from the pty master |
+| sidecar → parent | `0x82 EXIT` | status: exit code, or `-signal` |
+| sidecar → parent | `0x83 ERROR` | `errno`, UTF-8 message |
+
+### Differences from the native backends
+
+- The executable comes from the `PTY_SIDECAR` environment variable only; there
+  is no embedded binary yet. Without it `spawn` raises `OSError(ENOTSUP)`.
+- `resize` is synchronous in the API but asynchronous underneath: it queues a
+  frame for the command pump, so it is ordered before a `write` issued after
+  it, and reports `EBADF` once the pty is closed. A failure inside the sidecar
+  that surfaces later arrives as an `ERROR` frame on the next read.
+- Commands are queued without a bound, so a writer that outruns a child which
+  never reads its input buffers in memory instead of blocking as the native
+  backends do.
+- Only unix hosts are supported: the sidecar uses `fork`/`execve` and a
+  `/dev/ptmx` pty. A wasm program on a Windows host has no sidecar to run.
+- Teardown is bounded: after closing the command pipe the sidecar hangs up,
+  runs the 5 s grace period, kills the group and exits, and its final flush
+  gives up after that same period, so a parent that stopped reading cannot
+  keep it alive. The parent drains whatever the sidecar still sends and then
+  reaps it.

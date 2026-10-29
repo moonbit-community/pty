@@ -10,5 +10,9 @@ _build/
 # clangd
 compile_flags.txt
 
+# Locally built sidecar (from sidecar/sidecar.c)
+sidecar/sidecar
+sidecar/sidecar.exe
+
 # VSCode
 .vscode/

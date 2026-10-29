@@ -1,8 +1,9 @@
 # moonbit-community/pty
 
-Cross-platform PTY (pseudo-terminal) spawning for MoonBit native targets,
-integrated with `moonbitlang/async` so reads and writes go through the async
-event loop instead of blocking the thread.
+Cross-platform PTY (pseudo-terminal) spawning for MoonBit, integrated with
+`moonbitlang/async` so reads and writes go through the async event loop instead
+of blocking the thread. Native targets use the pty directly; the `wasm` target
+gets the same API through a native sidecar process (see [wasm](#wasm)).
 
 ## Usage
 
@@ -72,6 +73,33 @@ escape sequences (including an initial clear-screen) surrounding your child's
 output. Strip or escape them before asserting on pty output in tests — a
 failing diff that prints raw pty output replays those sequences into your
 terminal.
+
+## wasm
+
+On the `wasm` target the pty is owned by a small native sidecar process
+(`sidecar/sidecar.c`): a wasm module cannot open a pseudo-terminal, and
+`moonbitlang/async/raw_fd` — what the native backends use for the master — is
+native only. The wasm backend is therefore its own package, with the same API
+(`spawn`, `with_pty`, `Pty`, `Pty::wait`, `Pty::pid`, `Pty::resize`,
+`Reader`/`Writer`):
+
+```moonbit
+import {
+  "moonbit-community/pty/wasm" @pty,
+}
+```
+
+Build the sidecar once and point `PTY_SIDECAR` at it (the MVP does not embed a
+binary yet):
+
+```sh
+cc -O2 -Wall -o sidecar/sidecar sidecar/sidecar.c
+PTY_SIDECAR="$PWD/sidecar/sidecar" moon run --target wasm your/package
+```
+
+`spawn` raises `OSError(ENOTSUP)` when `PTY_SIDECAR` is unset. The wire
+protocol and the behavioural differences are documented in
+[docs/internals.md](docs/internals.md).
 
 ## Further reading
 
