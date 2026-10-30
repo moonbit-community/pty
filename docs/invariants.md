@@ -129,7 +129,8 @@ rationale. Nothing here is pending work; it is documented so it doesn't get
   share a package — the native package is not importable from a wasm package,
   and a shared package imported by the root package is an unused import on
   Windows, which `moon check --deny-warn` rejects. Change both together; the
-  table in `pty_unix_test.mbt` is the normative set of cases.
+  table in the `test "get_path_candidates"` block of `pty_unix.mbt` is the
+  normative set of cases.
 - The sidecar's stdout is non-blocking and every event frame is queued, so a
   parent that stops reading events cannot block command processing; above
   `OUT_HIGH_WATER` the pty itself is left unread, which is the backpressure.

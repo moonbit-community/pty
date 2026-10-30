@@ -142,6 +142,15 @@ is still made by `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`;
 `STARTF_USESTDHANDLES` only prevents inherited stdio redirection from
 competing with that attachment.
 
+### Windows argv encoding
+
+Windows receives one command-line string rather than an argv array. The
+command line is built by quoting each argument so that `CommandLineToArgvW`
+(and the C runtime's argv parser) recovers it verbatim, then passed to
+`CreateProcessW` as UTF-16 alongside the resolved `lpApplicationName`.
+Non-ASCII executable paths, arguments, and working directories therefore do
+not depend on the process ANSI code page.
+
 ## Wasm: the sidecar backend
 
 A wasm build has no C FFI, and `moonbitlang/async/raw_fd` — the package the

@@ -1,6 +1,6 @@
 ///|
-// The same table as `pty_unix_test.mbt` in the root package: the native and
-// wasm copies of the PATH rule have to resolve identically (see
+// The same table as the `test "get_path_candidates"` block in `pty_unix.mbt`
+// (the native copy of the rule): the two have to resolve identically (see
 // docs/invariants.md).
 test "get_path_candidates" {
   assert_eq(@path.get_path_candidates(file="sh", path="/usr/bin:/bin"), [
