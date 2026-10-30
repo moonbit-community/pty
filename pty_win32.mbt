@@ -30,7 +30,7 @@ priv struct PseudoConsole(@handle.Handle)
 ///|
 #cfg(platform="windows")
 #borrow(hpc)
-extern "c" fn PseudoConsole::close(hpc : PseudoConsole) = "ClosePseudoConsole"
+extern "c" fn PseudoConsole::close(hpc : PseudoConsole) = "moonbit_pty_win32_close_pseudo_console"
 
 ///|
 /// A pseudo-terminal attached to a spawned child process.
@@ -200,12 +200,11 @@ pub async fn[X] spawn(
       // that makes the cleanup run at all.
       @async.protect_from_cancel() <| () => {
         wait_pid_with(pid) <| () => {
-          // Our end of the output pipe goes first. Before Windows 11 24H2
-          // `ClosePseudoConsole` waits for the pseudoconsole to exit, and
-          // the pseudoconsole blocks on a full output pipe that nobody
-          // reads any more: closing the HPCON first can hang right here, on
-          // the event-loop thread (docs/invariants.md). The group defer
-          // closes the pipe again; `RawFdStream::close` is idempotent.
+          // Our end of the output pipe goes first. Nobody reads it any
+          // more, and before Windows 11 24H2 a pseudoconsole blocked on a
+          // full output pipe never finishes closing (docs/invariants.md).
+          // The group defer closes the pipe again; `RawFdStream::close` is
+          // idempotent.
           output_reader.close()
           close_pseudo_console()
           // Grace period before the hard kill; matches the ~5s the OS

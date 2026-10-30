@@ -603,6 +603,40 @@ fail_to_malloc_attribute_list:
   return -1;
 }
 
+static DWORD WINAPI
+moonbit_pty_win32_close_pseudo_console_thread(LPVOID hpc) {
+  ClosePseudoConsole((HPCON)hpc);
+  return 0;
+}
+
+/**
+ * `ClosePseudoConsole`, on a thread of its own.
+ *
+ * Before Windows 11 24H2 the call waits for the pseudoconsole to exit, and
+ * the pseudoconsole cannot exit until its remaining output has been read.
+ * Made on the event-loop thread it would stop the very reader it is waiting
+ * for (docs/invariants.md). On a helper thread it may take as long as it
+ * likes: every Windows version then behaves like 24H2, where the call
+ * returns immediately.
+ *
+ * The thread is not joined. It ends when the pseudoconsole does, which at
+ * the latest is when our ends of the pipes are closed.
+ */
+MOONBIT_FFI_EXPORT
+void
+moonbit_pty_win32_close_pseudo_console(HPCON hpc) {
+  HANDLE thread = CreateThread(
+    NULL, 0, moonbit_pty_win32_close_pseudo_console_thread, hpc, 0, NULL
+  );
+  if (thread) {
+    CloseHandle(thread);
+  } else {
+    /* No thread to hand it to: a close that may block still beats leaking
+     * the pseudoconsole. */
+    ClosePseudoConsole(hpc);
+  }
+}
+
 MOONBIT_FFI_EXPORT
 int32_t
 moonbit_pty_win32_resize(HPCON hpc, int32_t rows, int32_t cols) {

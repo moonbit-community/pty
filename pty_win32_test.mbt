@@ -189,6 +189,43 @@ async test "@pty.Pty::resize raises EBADF after the group closed the pty" {
 }
 
 ///|
+// Guards the off-loop `ClosePseudoConsole` recorded in docs/invariants.md.
+// `type` dumps two 100x300 screens of text in one go and the child exits at
+// once, so the pseudoconsole still has a full frame to write, several times
+// what the 4096-byte pipe holds, when the wait task closes it. Before
+// Windows 11 24H2 `ClosePseudoConsole` waits for the pseudoconsole to exit;
+// called on the event-loop thread it also stops the reader below, the pipe
+// never empties, and neither side moves again. As with the next test, that
+// failure shows up as the CI job's `timeout-minutes`, not as an assertion.
+#cfg(platform="windows")
+async test "@pty.spawn reaches EOF when the child exits right after a screenful" {
+  with_tmpdir(prefix="moonbit-pty-screenful") <| tmpdir => {
+    let line = "0123456789abcdefghij".repeat(14)
+    let content = StringBuilder()
+    for _ in 0..<200 {
+      content <+ "\{line}\r\n"
+    }
+    content <+ "END_OF_SCREENFUL\r\n"
+    let file = "\{tmpdir}\\screenful.txt"
+    @async/fs.write_file(file, content.to_string(), create_mode=CreateNew)
+    let completed = @async.with_timeout_opt(60000) <| () => {
+      @async.with_task_group() <| group => {
+        let pty = @pty.spawn(
+          group,
+          "cmd",
+          ["/c", "type", file],
+          rows=100,
+          cols=300,
+        )
+        let text = pty.read_all().text()
+        (text.contains("END_OF_SCREENFUL"), pty.wait())
+      }
+    }
+    assert_eq(completed, Some((true, 0)))
+  }
+}
+
+///|
 // Guards the ConPTY teardown order recorded in docs/invariants.md: the child
 // floods the pseudoconsole and nobody reads the output pipe, so by the time
 // the group body returns the pipe is full and the pseudoconsole is blocked
