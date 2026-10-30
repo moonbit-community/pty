@@ -327,7 +327,9 @@ fn get_path_candidates(
   if file.contains_char('/') {
     return [@encoding/utf8.encode(file)]
   }
-  let view = path.view()
+  // `path` is already a `StringView`; `view()` would only return it, and is
+  // deprecated.
+  let view = path
   let candidates = []
   for p = view, dirp = view {
     match p {

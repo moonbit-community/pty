@@ -1,0 +1,13 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbit-community/pty/internal/path"
+
+// Values
+pub fn get_path_candidates(file~ : StringView, path~ : StringView) -> FixedArray[Bytes]
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
