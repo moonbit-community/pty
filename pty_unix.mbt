@@ -327,7 +327,7 @@ fn get_path_candidates(
   if file.contains_char('/') {
     return [@encoding/utf8.encode(file)]
   }
-  let view = path.view()
+  let view = path[:]
   let candidates = []
   for p = view, dirp = view {
     match p {
