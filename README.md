@@ -1,8 +1,20 @@
 # moonbit-community/pty
 
-Cross-platform PTY (pseudo-terminal) spawning for MoonBit native targets,
-integrated with `moonbitlang/async` so reads and writes go through the async
-event loop instead of blocking the thread.
+Cross-platform PTY (pseudo-terminal) spawning for MoonBit, on the native and
+wasm targets, integrated with `moonbitlang/async` so reads and writes go
+through the async event loop instead of blocking the thread.
+
+Each pty is held by a small sidecar process that the library starts and talks
+to over pipes, which is what makes the wasm target (programs run with
+`moonrun`) work. The sidecar executable for Linux, macOS and Windows on
+x86_64/arm64 is embedded in the package and written once to the user's cache
+directory; set `PTY_SIDECAR` to the path of one built from
+`sidecar/sidecar.c` to use that instead:
+
+```sh
+cc -O2 -o pty-sidecar sidecar/sidecar.c                 # Unix
+cl /O2 /Fe:pty-sidecar.exe sidecar\sidecar.c            # Windows
+```
 
 ## Usage
 
@@ -57,15 +69,15 @@ semantics as `@async/process.spawn`) to let the group exit as soon as its own
 tasks are done, terminating the child instead of waiting for it.
 
 Because the pty stays open until its group exits, do not spawn many ptys into
-a single long-lived group: their file descriptors accumulate. Give each pty a
-group of its own, or use `with_pty`.
+a single long-lived group: their sidecar processes and pipes accumulate. Give
+each pty a group of its own, or use `with_pty`.
 
 ## Drain the pty concurrently
 
-Do **not** `wait()` first and `read()` afterwards. A pty master is a bounded
-kernel queue, and on macOS the kernel discards whatever is still queued a few
-hundred milliseconds after the child exits. Read concurrently while waiting;
-reading late yields a clean but empty EOF.
+Do **not** `wait()` first and `read()` afterwards. The output travels through
+bounded queues (the pty and the pipe from the sidecar), and a child whose
+output nobody reads blocks writing it, so it never exits. Read concurrently
+while waiting.
 
 Relatedly, ConPTY output is a screen rendering, not a byte stream: expect VT
 escape sequences (including an initial clear-screen) surrounding your child's
@@ -75,8 +87,9 @@ terminal.
 
 ## Further reading
 
-- [docs/internals.md](docs/internals.md) — executable resolution, environment
-  merging, and platform architecture: unix fork/execve, Windows ConPTY
-  startup, argv encoding.
+- [docs/internals.md](docs/internals.md) — the sidecar, executable
+  resolution, environment merging, and platform architecture: unix
+  fork/execve, Windows ConPTY startup, argv encoding.
+- [sidecar/README.md](sidecar/README.md) — the sidecar's pipe protocol.
 - [docs/invariants.md](docs/invariants.md) — hard-won debugging conclusions
   and decision records that must not regress.

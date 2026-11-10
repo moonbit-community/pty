@@ -4,7 +4,6 @@ package "moonbit-community/pty"
 import {
   "moonbitlang/async",
   "moonbitlang/async/io",
-  "moonbitlang/async/os_error",
 }
 
 // Values
@@ -23,7 +22,7 @@ pub async fn Pty::read_all(Self) -> &@io.Data
 pub async fn Pty::read_exactly(Self, Int32) -> Bytes
 pub async fn Pty::read_some(Self, max_len? : Int32) -> Bytes?
 pub async fn Pty::read_until(Self, StringView) -> String?
-pub fn Pty::resize(Self, rows~ : Int32, cols~ : Int32) -> Unit raise @os_error.OSError
+pub async fn Pty::resize(Self, rows~ : Int32, cols~ : Int32) -> Unit
 pub async fn Pty::wait(Self) -> Int32
 pub async fn Pty::write(Self, &@io.Data) -> Unit
 pub async fn Pty::write_once(Self, Bytes, offset~ : Int32, len~ : Int32) -> Int32

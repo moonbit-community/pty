@@ -24,11 +24,17 @@ You can browse and install extra skills here:
 - Try to keep deprecated blocks in file called `deprecated.mbt` in each
   directory.
 
-- This project splits platform code with `#cfg(platform=...)` blocks across
-  per-platform files. Inactive-platform code is NOT type-checked, so an edit
-  that renames or reshapes a shared helper compiles cleanly while silently
-  breaking the other platform — when touching anything used by both sides,
-  check the sibling `pty_unix*` / `pty_win32*` files by hand.
+- The library has no FFI: every target reaches the pty through the sidecar
+  process (`sidecar/sidecar.c`, driven by `internal/sidecar`), see
+  docs/internals.md. Platform differences in MoonBit are decided at run time
+  with `@async.platform`, so both the Unix and the Windows request builders
+  are type-checked on every host; keep it that way. Tests do the same
+  (`guard @async.platform is ... else { return }`): `#cfg(platform=...)`
+  cannot tell a wasm build which host it runs on. Keep `#cfg` for types
+  that differ per platform only (Windows' `Fd` is an opaque handle).
+  `sidecar.c` has a Unix and a Windows half: check the Windows half compiles
+  (`zig cc -target x86_64-windows-gnu` works on any host) when touching
+  shared parts.
 
 ## Tooling
 
@@ -47,6 +53,11 @@ You can browse and install extra skills here:
   format the code. Check the diffs of `.mbti` file to see if the changes are
   expected.
 
+- Tests need a sidecar until CI has filled the embedded table: build one and
+  run both targets,
+  `cc -O2 -o _build/pty-sidecar sidecar/sidecar.c && PTY_SIDECAR=$PWD/_build/pty-sidecar moon test --target native`
+  (and `--target wasm`).
+
 - Run `moon test` to check tests pass. MoonBit supports snapshot testing; when
   changes affect outputs, run `moon test --update` to refresh snapshots.
 
@@ -55,3 +66,11 @@ You can browse and install extra skills here:
   behavior. For solid, well-defined results (e.g. scientific computations),
   prefer assertion tests. You can use `moon coverage analyze > uncovered.log` to
   see which parts of your code are not covered by tests.
+
+## Release workflow
+
+- The `sidecars` workflow rebuilds the sidecar binaries whenever `sidecar/`
+  changes on `main` and commits `internal/sidecar/sidecars.generated.mbt`
+  back to `main` (needs the `SIDECARS_DEPLOY_KEY` secret). Release from a
+  commit after that one: the publish workflow refuses a package whose table
+  is missing a platform, which would only work with `PTY_SIDECAR`.

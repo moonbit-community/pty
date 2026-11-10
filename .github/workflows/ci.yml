@@ -50,11 +50,30 @@ jobs:
       - name: Version
         run: moon version
 
+      # The embedded sidecar table is only filled on main (sidecars.yml), so
+      # tests use one built from this checkout.
+      - name: Build the sidecar
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cc -O2 -Wall -o "$RUNNER_TEMP/pty-sidecar" sidecar/sidecar.c
+          echo "PTY_SIDECAR=$RUNNER_TEMP/pty-sidecar" >> "$GITHUB_ENV"
+
+      - name: Build the sidecar
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cl /nologo /O2 /Fe:"$env:RUNNER_TEMP\pty-sidecar.exe" sidecar\sidecar.c
+          "PTY_SIDECAR=$env:RUNNER_TEMP\pty-sidecar.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Update registry index
         run: moon update
 
       - name: Check
-        run: moon check --deny-warn
+        run: moon check --target native --deny-warn
+
+      - name: Check (wasm)
+        run: moon check --target wasm --deny-warn
 
       - name: Verify generated interfaces
         run: moon info
@@ -63,7 +82,10 @@ jobs:
         run: moon fmt --check
 
       - name: Test
-        run: moon test
+        run: moon test --target native
+
+      - name: Test (wasm)
+        run: moon test --target wasm
 
       - name: Verify clean tree
         run: git diff --exit-code

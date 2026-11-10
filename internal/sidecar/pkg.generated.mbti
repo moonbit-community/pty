@@ -1,0 +1,42 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbit-community/pty/internal/sidecar"
+
+import {
+  "moonbitlang/async/process",
+}
+
+// Values
+
+// Errors
+pub suberror SidecarError {
+  SidecarError(String)
+}
+pub fn SidecarError::output(Self, &Logger) -> Unit
+pub fn SidecarError::to_string(Self) -> String
+pub impl Show for SidecarError
+
+// Types and methods
+type Sidecar
+pub fn Sidecar::child_pid(Self) -> Int32
+pub async fn Sidecar::close(Self) -> Unit nocancel
+pub fn Sidecar::close_output(Self) -> Unit
+pub async fn Sidecar::hangup(Self) -> Unit
+pub async fn Sidecar::kill(Self) -> Unit
+pub fn Sidecar::output(Self) -> @process.ReadFromProcess
+pub async fn Sidecar::resize(Self, rows~ : Int32, cols~ : Int32) -> Unit
+pub async fn Sidecar::spawn(SpawnRequest) -> Self
+pub async fn Sidecar::wait(Self) -> Int32
+pub async fn Sidecar::write_once(Self, Bytes, offset~ : Int32, len~ : Int32) -> Int32
+
+pub(all) struct SpawnRequest {
+  rows : Int32
+  cols : Int32
+  candidates : Array[String]
+  argv : Array[String]
+  env : Array[String]
+  cwd : String?
+}
+
+// Type aliases
+
+// Traits
