@@ -2,9 +2,13 @@
 // Unix-only behavior tests. Executable fixtures are generated at test time
 // under a tmpdir (or taken from PATH), so no platform-specific binaries need
 // to be committed.
+//
+// Tests pick their platform at run time with `@async.platform`, never with
+// `#cfg(platform=...)`: a wasm build has no compile-time platform, so it
+// would run these on a Windows host too.
 
 ///|
-// Shared with the win32 tests (same blackbox test package), so no #cfg.
+// Shared with the win32 tests (same blackbox test package).
 async fn[T] with_tmpdir(prefix~ : StringView, f : async (String) -> T) -> T {
   let tmpdir = @async/fs.tmpdir(prefix~)
   async fn remove_tmpdir() -> Unit nocancel {
@@ -17,20 +21,17 @@ async fn[T] with_tmpdir(prefix~ : StringView, f : async (String) -> T) -> T {
 }
 
 ///|
-#cfg(not(platform="windows"))
 const ENOENT : Int32 = 2
 
 ///|
-#cfg(not(platform="windows"))
 const EACCES : Int32 = 13
 
 ///|
-#cfg(not(platform="windows"))
 const EBADF : Int32 = 9
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| g => {
     // `file` is looked up in PATH and becomes `argv[0]`; `args` is `argv[1..]`.
     let pty = @pty.spawn(g, "echo", ["hello"])
@@ -40,8 +41,8 @@ async test "@pty.spawn" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.Pty::wait returns the child's exit code" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| group => {
     let pty = @pty.spawn(group, "sh", ["-c", "exit 7"])
     assert_eq(pty.wait(), 7)
@@ -49,8 +50,8 @@ async test "@pty.Pty::wait returns the child's exit code" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn passes file as argv[0]" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| g => {
     // `$0` in `sh -c` is the shell's own `argv[0]`, so this observes what the
     // child was actually handed rather than what we asked for.
@@ -61,8 +62,8 @@ async test "@pty.spawn passes file as argv[0]" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn resolves an absolute file without searching PATH" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| g => {
     let pty = @pty.spawn(g, "/bin/sh", ["-c", "echo $0"])
     assert_eq(pty.read_all().text(), "/bin/sh\r\n")
@@ -71,8 +72,8 @@ async test "@pty.spawn resolves an absolute file without searching PATH" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn(cwd~)" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| group => {
     with_tmpdir(prefix="moonbit-pty-spawn-cwd") <| tmpdir => {
       let pty = @pty.spawn(
@@ -89,8 +90,8 @@ async test "@pty.spawn(cwd~)" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn resolves a relative file against cwd" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| group => {
     with_tmpdir(prefix="moonbit-pty-relative") <| tmpdir => {
       @async/fs.write_file(
@@ -107,8 +108,8 @@ async test "@pty.spawn resolves a relative file against cwd" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn handles unicode paths and argv" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| group => {
     with_tmpdir(prefix="moonbit-pty-unicode") <| tmpdir => {
       // Unicode exercises the UTF-8 encoding of all three spawn inputs at
@@ -132,8 +133,8 @@ async test "@pty.spawn handles unicode paths and argv" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn raises ENOENT for a non-existent program" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| group => {
     try @pty.spawn(group, "./non-existent", []) catch {
       @os_error.OSError(ENOENT, ..) => ()
@@ -145,8 +146,8 @@ async test "@pty.spawn raises ENOENT for a non-existent program" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn does not resolve a bare name against cwd through empty PATH entries" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| group => {
     with_tmpdir(prefix="moonbit-pty-empty-path") <| tmpdir => {
       // An executable sitting in `cwd` under the bare name being spawned:
@@ -178,8 +179,8 @@ async test "@pty.spawn does not resolve a bare name against cwd through empty PA
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn raises EACCES for a file without execute permission" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| group => {
     with_tmpdir(prefix="moonbit-pty-noexec") <| tmpdir => {
       @async/fs.write_file(
@@ -199,8 +200,8 @@ async test "@pty.spawn raises EACCES for a file without execute permission" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn applies rows/cols and resize updates the winsize" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| group => {
     // `stty size` reports the tty winsize as "rows cols"; `read` holds the
     // child until the resize below has happened, so the two reports are
@@ -223,8 +224,8 @@ async test "@pty.spawn applies rows/cols and resize updates the winsize" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.Pty::resize raises EBADF after the group closed the pty" {
+  guard !(@async.platform is Windows) else { return }
   let mut pty : @pty.Pty? = None
   @async.with_task_group() <| group => {
     pty = Some(@pty.spawn(group, "true", []))
@@ -239,8 +240,8 @@ async test "@pty.Pty::resize raises EBADF after the group closed the pty" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "idle pty read waits instead of reporting EOF" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| group => {
     // `cat` is alive but silent: a read must suspend until data arrives,
     // never surface a spurious EOF — the `EIO => 0` mapping in
@@ -255,8 +256,8 @@ async test "idle pty read waits instead of reporting EOF" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn cancellation kills a running program" {
+  guard !(@async.platform is Windows) else { return }
   // `spawn` returns within a few milliseconds, so the 200ms timer reliably
   // fires while the child is still running and the group is blocked on its
   // wait task. The test finishing at all is the real assertion: cancellation
@@ -272,8 +273,8 @@ async test "@pty.spawn cancellation kills a running program" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn(no_wait=true) lets the group exit without waiting" {
+  guard !(@async.platform is Windows) else { return }
   // Same `no_wait` semantics as `@async/process.spawn`: the group exits as
   // soon as its own body is done, cancelling the wait task, which kills the
   // child. Completing inside the timeout (instead of blocking on `sleep` for
@@ -287,8 +288,8 @@ async test "@pty.spawn(no_wait=true) lets the group exit without waiting" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.Pty::pid is the pid of the spawned child" {
+  guard !(@async.platform is Windows) else { return }
   @async.with_task_group() <| group => {
     // `$$` is the shell's own pid, which is the pid fork returned by spawn;
     // the string comparison also proves pid() is a real positive value.
@@ -300,8 +301,8 @@ async test "@pty.Pty::pid is the pid of the spawned child" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn(extra_env~) merges over the inherited environment" {
+  guard !(@async.platform is Windows) else { return }
   // Variables only this test process exports, so the child's view is fully
   // determined here: one is inherited untouched, one is overridden by
   // extra_env, one exists only in extra_env.
@@ -329,8 +330,8 @@ async test "@pty.spawn(extra_env~) merges over the inherited environment" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.spawn(inherit_env=false) starts the child with an empty environment" {
+  guard !(@async.platform is Windows) else { return }
   // The child not seeing a variable this process exports proves nothing was
   // inherited, without depending on which variables sh leaves alone when
   // they are missing (zsh, for one, synthesizes HOME from passwd). `sh` is
@@ -361,8 +362,8 @@ async test "@pty.spawn(inherit_env=false) starts the child with an empty environ
 /// The group does not return until the cleanup has reaped the child, so the
 /// pid is gone by the time `with_task_group` returns; the poll only makes the
 /// probe tolerant of a slow parent-side teardown.
-#cfg(not(platform="windows"))
 async test "@pty.spawn cancellation kills a child that ignores SIGHUP" {
+  guard !(@async.platform is Windows) else { return }
   let mut pid = 0
   @async.with_task_group() <| group => {
     let pty = @pty.spawn(
@@ -382,7 +383,7 @@ async test "@pty.spawn cancellation kills a child that ignores SIGHUP" {
   // grace period is 5000ms (docs/invariants.md), hence the ~5s bound.
   let mut alive = true
   for _ in 0..<24 {
-    if !pid_exists(pid) {
+    if @async/process.run("sh", ["-c", "kill -0 \{pid} 2>/dev/null"]) != 0 {
       alive = false
       break
     }
@@ -392,8 +393,8 @@ async test "@pty.spawn cancellation kills a child that ignores SIGHUP" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.with_pty runs f with the pty and returns its result" {
+  guard !(@async.platform is Windows) else { return }
   assert_eq(
     @pty.with_pty("echo", ["hello"], pty => pty.read_all().text()),
     "hello\r\n",
@@ -402,8 +403,8 @@ async test "@pty.with_pty runs f with the pty and returns its result" {
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.with_pty hangs up a child that is still running when f returns" {
+  guard !(@async.platform is Windows) else { return }
   // Completing inside the timeout is the first assertion: `f` returns at
   // once while `sleep` would run for an hour, so `with_pty` must end the
   // child rather than wait for it.
@@ -414,12 +415,14 @@ async test "@pty.with_pty hangs up a child that is still running when f returns"
   assert_true(completed is Some(_))
   // `with_pty` returns only after the child has been reaped, so the pid is
   // already gone: `kill -0` succeeds only while it exists.
-  assert_false(pid_exists(pid))
+  assert_true(
+    @async/process.run("sh", ["-c", "kill -0 \{pid} 2>/dev/null"]) != 0,
+  )
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "@pty.with_pty closes the pty when f returns" {
+  guard !(@async.platform is Windows) else { return }
   // Letting the `Pty` escape is exactly what callers must not do; it is the
   // only way to observe from outside that the terminal was closed.
   let pty = @pty.with_pty("true", [], pty => pty)
@@ -429,50 +432,4 @@ async test "@pty.with_pty closes the pty when f returns" {
   } noraise {
     _ => fail("expected resize after with_pty returned to raise EBADF")
   }
-}
-
-///|
-/// Whether `pid` still exists: `kill -0` succeeds only while it does. Probed
-/// on a pty of its own, so the tests need no process API besides this
-/// package.
-#cfg(not(platform="windows"))
-async fn pid_exists(pid : Int32) -> Bool {
-  @pty.with_pty("sh", ["-c", "kill -0 \{pid} 2>/dev/null"], pty => pty.wait()) ==
-  0
-}
-
-///|
-// Guards what `with_pty` exists for: a session must give its descriptors
-// back when it ends, not when some enclosing task group does. The kernel
-// hands out the lowest free descriptor number, so sessions that release
-// their pty keep getting (nearly) the same number back, while a leak climbs
-// by at least one per session — 50 sessions against a bound of 8 leaves no
-// room to confuse the two.
-#cfg(not(platform="windows"))
-async test "@pty.with_pty: sessions do not accumulate file descriptors" {
-  // The lowest free descriptor once a session is over, probed by opening a
-  // file.
-  async fn session_fd() -> Int64 {
-    @pty.with_pty("true", [], pty => ignore(pty.read_all()))
-    let file = @async/fs.open("/dev/null", mode=ReadOnly)
-    // `fd()` is the descriptor (`Int32`) on native. On wasm it is moonrun's
-    // `UInt64` handle: a generation in the high 32 bits and a reused slot
-    // in the low 32, and the slot behaves like the lowest free descriptor.
-    // Both print as plain decimal digits.
-    let digits = file.fd().to_string()
-    file.close()
-    let fd = digits.fold(init=0L, (n, c) => {
-      n * 10 + (c.to_int() - '0'.to_int()).to_int64()
-    })
-    fd & 0xFFFF_FFFFL
-  }
-  let first = session_fd()
-  let mut highest = first
-  for _ in 0..<50 {
-    let fd = session_fd()
-    if fd > highest {
-      highest = fd
-    }
-  }
-  assert_true(highest - first < 8)
 }

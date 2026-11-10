@@ -28,10 +28,12 @@ You can browse and install extra skills here:
   process (`sidecar/sidecar.c`, driven by `internal/sidecar`), see
   docs/internals.md. Platform differences in MoonBit are decided at run time
   with `@async.platform`, so both the Unix and the Windows request builders
-  are type-checked on every host; keep it that way. Only tests still use
-  `#cfg(platform=...)`. `sidecar.c` has a Unix and a Windows half: check the
-  Windows half compiles (`zig cc -target x86_64-windows-gnu` works on any
-  host) when touching shared parts.
+  are type-checked on every host; keep it that way. Tests do the same
+  (`guard @async.platform is ... else { return }`): `#cfg(platform=...)`
+  cannot tell a wasm build which host it runs on. `sidecar.c` has a Unix
+  and a Windows half: check the Windows half compiles
+  (`zig cc -target x86_64-windows-gnu` works on any host) when touching
+  shared parts.
 
 ## Tooling
 

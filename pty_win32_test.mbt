@@ -1,5 +1,4 @@
 ///|
-#cfg(platform="windows")
 const ERROR_FILE_NOT_FOUND : Int32 = 2
 
 ///|
@@ -7,17 +6,10 @@ const ERROR_FILE_NOT_FOUND : Int32 = 2
 // image. Which code it picks varies by Windows version/architecture: classic
 // is ERROR_BAD_EXE_FORMAT (193); Windows 11 was observed returning
 // ERROR_EXE_MACHINE_TYPE_MISMATCH (216) for the same text-file fixture.
-#cfg(platform="windows")
 const ERROR_BAD_EXE_FORMAT : Int32 = 193
 
 ///|
-#cfg(platform="windows")
 const ERROR_EXE_MACHINE_TYPE_MISMATCH : Int32 = 216
-
-///|
-// `Pty::resize` raises errno EBADF once the wait task has closed the HPCON.
-#cfg(platform="windows")
-const EBADF : Int32 = 9
 
 ///|
 // The win32 analog of the unix "generate fixtures at test time" policy:
@@ -25,7 +17,6 @@ const EBADF : Int32 = 9
 // (%ComSpec%) to `target`. Spawned with ["/c", "echo", text] it produces
 // observable output regardless of the name it runs under. No cleanup of its
 // own — `target` is expected to live in a `with_tmpdir` directory.
-#cfg(platform="windows")
 async fn with_comspec_copied(target : StringView, f : async () -> Unit) -> Unit {
   // `get_env_var` is `GetEnvironmentVariableW` on win32, which looks keys up
   // ordinal-ignore-case itself.
@@ -41,8 +32,8 @@ async fn with_comspec_copied(target : StringView, f : async () -> Unit) -> Unit 
 }
 
 ///|
-#cfg(platform="windows")
 async test "@pty.spawn (win32)" {
+  guard @async.platform is Windows else { return }
   @async.with_task_group() <| g => {
     let pty = @pty.spawn(g, "moon", ["version"], rows=24, cols=80)
     assert_true(pty.read_all().text().contains("moon"))
@@ -51,8 +42,8 @@ async test "@pty.spawn (win32)" {
 }
 
 ///|
-#cfg(platform="windows")
 async test "@pty.spawn can spawn file.exe using file" {
+  guard @async.platform is Windows else { return }
   with_tmpdir(prefix="moonbit-pty-fixture") <| tmpdir => {
     with_comspec_copied("\{tmpdir}\\echo.exe") <| () => {
       async fn assert_pty_spawn(file : StringView) {
@@ -72,8 +63,8 @@ async test "@pty.spawn can spawn file.exe using file" {
 }
 
 ///|
-#cfg(platform="windows")
 async test "@pty.spawn can spawn file.exe using cwd" {
+  guard @async.platform is Windows else { return }
   with_tmpdir(prefix="moonbit-pty-fixture") <| tmpdir => {
     with_comspec_copied("\{tmpdir}\\echo.exe") <| () => {
       async fn assert_pty_spawn(file : StringView) {
@@ -93,8 +84,8 @@ async test "@pty.spawn can spawn file.exe using cwd" {
 }
 
 ///|
-#cfg(platform="windows")
 async test "@pty.Pty::wait returns the child's exit code (win32)" {
+  guard @async.platform is Windows else { return }
   @async.with_task_group() <| group => {
     let pty = @pty.spawn(group, "cmd", ["/c", "exit", "7"])
     assert_eq(pty.wait(), 7)
@@ -106,8 +97,8 @@ async test "@pty.Pty::wait returns the child's exit code (win32)" {
 // UTF-16 conversions behind GetFullPathNameW / the file-exists probe /
 // CreateProcessW's lpApplicationName. The echoed text stays ASCII so the
 // assertion is independent of cmd.exe's output codepage.
-#cfg(platform="windows")
 async test "@pty.spawn handles unicode paths (win32)" {
+  guard @async.platform is Windows else { return }
   @async.with_task_group() <| group => {
     with_tmpdir(prefix="moonbit-pty-unicode") <| tmpdir => {
       let cwd = "\{tmpdir}\\路径"
@@ -125,8 +116,8 @@ async test "@pty.spawn handles unicode paths (win32)" {
 ///|
 // The userland resolver raises before any handle exists, so this exercises
 // the no-cleanup failure path.
-#cfg(platform="windows")
 async test "@pty.spawn raises ERROR_FILE_NOT_FOUND for a non-existent program" {
+  guard @async.platform is Windows else { return }
   @async.with_task_group() <| group => {
     try @pty.spawn(group, ".\\non-existent", []) catch {
       @os_error.OSError(ERROR_FILE_NOT_FOUND, ..) => ()
@@ -146,8 +137,8 @@ async test "@pty.spawn raises ERROR_FILE_NOT_FOUND for a non-existent program" {
 // must each be closed exactly once). The follow-up spawn in the same group is
 // the double-close detector: on unix the equivalent bug surfaced as EBADF in
 // whatever ran next, because the recycled fd number got closed a second time.
-#cfg(platform="windows")
 async test "@pty.spawn raises ERROR_BAD_EXE_FORMAT for a non-executable .exe" {
+  guard @async.platform is Windows else { return }
   @async.with_task_group() <| group => {
     with_tmpdir(prefix="moonbit-pty-badexe") <| tmpdir => {
       @async/fs.write_file(
@@ -173,8 +164,8 @@ async test "@pty.spawn raises ERROR_BAD_EXE_FORMAT for a non-executable .exe" {
 }
 
 ///|
-#cfg(platform="windows")
-async test "@pty.Pty::resize raises EBADF after the group closed the pty" {
+async test "@pty.Pty::resize raises EBADF after the group closed the pty (win32)" {
+  guard @async.platform is Windows else { return }
   let mut pty : @pty.Pty? = None
   @async.with_task_group() <| group => {
     pty = Some(@pty.spawn(group, "cmd", ["/c", "echo", "bye"]))
@@ -197,8 +188,8 @@ async test "@pty.Pty::resize raises EBADF after the group closed the pty" {
 // timeout can fire either: the failure mode of this test is the CI job's
 // `timeout-minutes`, not an assertion. The bound covers the 5000ms grace
 // period plus the hard kill.
-#cfg(platform="windows")
 async test "@pty.spawn cancellation ends a child that floods an unread pty" {
+  guard @async.platform is Windows else { return }
   let completed = @async.with_timeout_opt(15000) <| () => {
     @async.with_task_group() <| group => {
       @pty.spawn(
@@ -215,8 +206,8 @@ async test "@pty.spawn cancellation ends a child that floods an unread pty" {
 }
 
 ///|
-#cfg(platform="windows")
-async test "@pty.with_pty runs f with the pty and returns its result" {
+async test "@pty.with_pty runs f with the pty and returns its result (win32)" {
+  guard @async.platform is Windows else { return }
   let text = @pty.with_pty("cmd", ["/c", "echo", "hello"]) <| pty => {
     pty.read_all().text()
   }
@@ -225,8 +216,8 @@ async test "@pty.with_pty runs f with the pty and returns its result" {
 }
 
 ///|
-#cfg(platform="windows")
-async test "@pty.with_pty closes the pty when f returns" {
+async test "@pty.with_pty closes the pty when f returns (win32)" {
+  guard @async.platform is Windows else { return }
   // Letting the `Pty` escape is exactly what callers must not do; it is the
   // only way to observe from outside that the terminal was closed. Reading
   // to EOF first lets the child exit on its own before `f` returns.

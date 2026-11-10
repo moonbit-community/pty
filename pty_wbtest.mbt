@@ -49,3 +49,35 @@ async test "wait_with: returns the waiter's result" {
     7,
   )
 }
+
+///|
+// Guards what `with_pty` exists for: a session must give its descriptors
+// back when it ends, not when some enclosing task group does. The kernel
+// hands out the lowest free descriptor number, so sessions that release
+// their pty keep getting (nearly) the same number back, while a leak climbs
+// by at least one per session — 50 sessions against a bound of 8 leaves no
+// room to confuse the two.
+async test "with_pty: sessions do not accumulate file descriptors" {
+  guard !(@async.platform is Windows) else { return }
+  // The lowest free descriptor once a session is over, probed with a pipe.
+  async fn session_fd() -> Int64 {
+    with_pty("true", [], pty => ignore(pty.read_all()))
+    let (r, w) = @async/pipe.pipe()
+    // `fd()` is the descriptor (`Int32`) on native. On wasm it is moonrun's
+    // `UInt64` handle: a generation in the high 32 bits and a reused slot
+    // in the low 32, and the slot behaves like the lowest free descriptor.
+    let fd = @string.parse_int64(r.fd().to_string()) & 0xFFFF_FFFFL
+    r.close()
+    w.close()
+    fd
+  }
+  let first = session_fd()
+  let mut highest = first
+  for _ in 0..<50 {
+    let fd = session_fd()
+    if fd > highest {
+      highest = fd
+    }
+  }
+  assert_true(highest - first < 8)
+}
