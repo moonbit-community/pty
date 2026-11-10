@@ -382,7 +382,7 @@ async test "@pty.spawn cancellation kills a child that ignores SIGHUP" {
   // grace period is 5000ms (docs/invariants.md), hence the ~5s bound.
   let mut alive = true
   for _ in 0..<24 {
-    if @async/process.run("sh", ["-c", "kill -0 \{pid} 2>/dev/null"]) != 0 {
+    if !pid_exists(pid) {
       alive = false
       break
     }
@@ -414,9 +414,7 @@ async test "@pty.with_pty hangs up a child that is still running when f returns"
   assert_true(completed is Some(_))
   // `with_pty` returns only after the child has been reaped, so the pid is
   // already gone: `kill -0` succeeds only while it exists.
-  assert_true(
-    @async/process.run("sh", ["-c", "kill -0 \{pid} 2>/dev/null"]) != 0,
-  )
+  assert_false(pid_exists(pid))
 }
 
 ///|
@@ -431,4 +429,50 @@ async test "@pty.with_pty closes the pty when f returns" {
   } noraise {
     _ => fail("expected resize after with_pty returned to raise EBADF")
   }
+}
+
+///|
+/// Whether `pid` still exists: `kill -0` succeeds only while it does. Probed
+/// on a pty of its own, so the tests need no process API besides this
+/// package.
+#cfg(not(platform="windows"))
+async fn pid_exists(pid : Int32) -> Bool {
+  @pty.with_pty("sh", ["-c", "kill -0 \{pid} 2>/dev/null"], pty => pty.wait()) ==
+  0
+}
+
+///|
+// Guards what `with_pty` exists for: a session must give its descriptors
+// back when it ends, not when some enclosing task group does. The kernel
+// hands out the lowest free descriptor number, so sessions that release
+// their pty keep getting (nearly) the same number back, while a leak climbs
+// by at least one per session — 50 sessions against a bound of 8 leaves no
+// room to confuse the two.
+#cfg(not(platform="windows"))
+async test "@pty.with_pty: sessions do not accumulate file descriptors" {
+  // The lowest free descriptor once a session is over, probed by opening a
+  // file.
+  async fn session_fd() -> Int64 {
+    @pty.with_pty("true", [], pty => ignore(pty.read_all()))
+    let file = @async/fs.open("/dev/null", mode=ReadOnly)
+    // `fd()` is the descriptor (`Int32`) on native. On wasm it is moonrun's
+    // `UInt64` handle: a generation in the high 32 bits and a reused slot
+    // in the low 32, and the slot behaves like the lowest free descriptor.
+    // Both print as plain decimal digits.
+    let digits = file.fd().to_string()
+    file.close()
+    let fd = digits.fold(init=0L, (n, c) => {
+      n * 10 + (c.to_int() - '0'.to_int()).to_int64()
+    })
+    fd & 0xFFFF_FFFFL
+  }
+  let first = session_fd()
+  let mut highest = first
+  for _ in 0..<50 {
+    let fd = session_fd()
+    if fd > highest {
+      highest = fd
+    }
+  }
+  assert_true(highest - first < 8)
 }

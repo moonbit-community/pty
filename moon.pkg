@@ -8,13 +8,6 @@ import {
 import {
   "moonbitlang/async/fs" @async/fs,
   "moonbitlang/async/os_error",
-  "moonbitlang/async/process" @async/process,
 } for "test"
-
-import {
-  "moonbitlang/async/pipe" @async/pipe,
-  "moonbitlang/async/process" @async/process,
-  "moonbitlang/core/string",
-} for "wbtest"
 
 supported_targets = "native+wasm"
