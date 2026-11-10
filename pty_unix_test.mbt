@@ -7,11 +7,9 @@
 // Shared with the win32 tests (same blackbox test package), so no #cfg.
 async fn[T] with_tmpdir(prefix~ : StringView, f : async (String) -> T) -> T {
   let tmpdir = @async/fs.tmpdir(prefix~)
-  async fn remove_tmpdir() {
-    @async.protect_from_cancel() <| () => {
-      @async/fs.rmdir(tmpdir, recursive=true) catch {
-        _ => ()
-      }
+  async fn remove_tmpdir() -> Unit nocancel {
+    @async/fs.rmdir(tmpdir, recursive=true) catch {
+      _ => ()
     }
   }
   defer remove_tmpdir()
@@ -233,7 +231,7 @@ async test "@pty.Pty::resize raises EBADF after the group closed the pty" {
   }
   guard pty is Some(pty) else { fail("pty was not spawned") }
   try pty.resize(rows=10, cols=10) catch {
-    OSError(EBADF, ..) => ()
+    @os_error.OSError(EBADF, ..) => ()
     error => raise error
   } noraise {
     _ => fail("expected resize on a closed pty to raise EBADF")

@@ -1,7 +1,34 @@
 # Platform internals
 
-How `@pty.spawn` works on each platform: executable resolution, environment
-merging, and process startup.
+How `@pty.spawn` works on each platform: the sidecar process, executable
+resolution, environment merging, and process startup.
+
+## Architecture: the sidecar
+
+The library itself never touches a terminal. Each pty is held by a small C
+program, the sidecar (`sidecar/sidecar.c`), which `spawn` starts with
+`@async/process.spawn_orphan` and talks to over its three stdio pipes:
+
+- stdin: framed commands (SPAWN, WRITE, RESIZE, HANGUP, KILL);
+- stdout: the terminal's output, raw;
+- stderr: framed events (SPAWNED, WROTE, RESIZED, EXIT, ...).
+
+The protocol is in `sidecar/README.md`. Because only `@async/process` and
+`@async/io` are involved, the same MoonBit code runs on the native and the
+wasm (moonrun) targets, and on every OS, with platform differences decided
+at run time (`@async.platform`) and confined to the request built for the
+sidecar and the two halves of `sidecar.c`.
+
+The executable is the one named by `PTY_SIDECAR` when set (tests,
+development), else the one embedded for the running `<os>-<arch>` in
+`internal/sidecar/sidecars.generated.mbt`, written once per content hash to
+the user's cache directory (`~/Library/Caches`, `$XDG_CACHE_HOME` or
+`~/.cache`, `%LOCALAPPDATA%`) and reused. The `sidecars` workflow rebuilds
+the embedded binaries whenever `sidecar/` changes on `main`.
+
+The sidecar lives as long as its command pipe: when the parent closes it
+(the task group exited) or dies, a still-running child is hung up, given the
+5 s grace period, then killed, and the sidecar exits.
 
 ## Executable resolution
 
@@ -85,7 +112,7 @@ non-ASCII keys.)
 
 ## Unix: fork + execve
 
-The parent opens the pty pair (`open("/dev/ptmx")`/`grantpt`/`unlockpt`) and
+Inside the sidecar, the parent opens the pty pair (`open("/dev/ptmx")`/`grantpt`/`unlockpt`) and
 prepares everything the child will need — encoded argv, envp, and the PATH
 candidate list — *before* forking, because the forked child does only
 async-signal-safe work and never allocates. The child then: `setsid`, adopts
@@ -94,11 +121,17 @@ the replica as controlling terminal (`TIOCSCTTY`), `dup2`s it onto stdio,
 `execve` over the prepared candidates, skipping `EACCES`/`ENOENT`/`ENOTDIR`.
 Any pre-exec failure writes its errno to an error pipe and `_exit`s; a
 successful exec closes the pipe via `FD_CLOEXEC`, so the parent reads either
-4 bytes (failure, with errno) or EOF (success).
+4 bytes (failure, with errno) or EOF (success), and reports SPAWNED or
+SPAWN_FAILED. The library builds argv, envp and the PATH candidates
+(`unix_spawn_request` in `pty_unix.mbt`) and sends them with SPAWN.
 
 ## Windows: ConPTY process startup
 
-Windows uses the ConPTY API instead of unix-style PTYs:
+Windows uses the ConPTY API instead of unix-style PTYs. The library builds
+the command line, the merged environment and the candidate list
+(`windows_spawn_request` in `pty_win32.mbt`); the sidecar expands each
+candidate with `GetFullPathNameW`, probes it with `GetFileAttributesW`, and
+then:
 
 1. Create two synchronous pipes:
    - input pipe: parent writes keyboard input to `inputWriteSide`; ConPTY reads
@@ -111,8 +144,9 @@ Windows uses the ConPTY API instead of unix-style PTYs:
    where `app` is the resolved executable (`lpApplicationName`) and `cmd` is
    the command line whose argv[0] is the caller's `file` verbatim.
 5. After `CreateProcessW` succeeds, close `inputReadSide` and
-   `outputWriteSide` in the parent. The parent keeps only `inputWriteSide`
-   and `outputReadSide` for async I/O.
+   `outputWriteSide` in the parent. The sidecar keeps only `inputWriteSide`
+   (fed by a writer thread) and `outputReadSide` (relayed to its stdout by
+   an output thread); a third thread waits for the child and reports EXIT.
 
 The child is launched with `bInheritHandles=FALSE`; the ConPTY handle is
 passed through the process-thread attribute list rather than inherited as a

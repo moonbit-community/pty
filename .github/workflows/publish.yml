@@ -33,8 +33,17 @@ jobs:
           tag="${GITHUB_REF_NAME#v}"
           test "$tag" = "$version"
 
+      # Without the table the published package only works with PTY_SIDECAR.
+      - name: Verify the embedded sidecars are present
+        run: |
+          for key in linux_x86_64 linux_arm64 macos_arm64 macos_x86_64 windows_x86_64; do
+            grep -q "^let sidecar_$key : Bytes" internal/sidecar/sidecars.generated.mbt
+          done
+
       - name: Check
-        run: moon check --target native
+        run: |
+          moon check --target native
+          moon check --target wasm
 
       - name: Publish
         run: |

@@ -6,7 +6,6 @@
 // https://learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments:
 // backslashes are literal unless they precede a `"`, in which case each is
 // doubled and the `"` is escaped as `\"`.
-#cfg(platform="windows")
 fn StringBuilder::write_arg_with_windows_escape(
   builder : StringBuilder,
   arg : StringView,
@@ -52,7 +51,6 @@ fn StringBuilder::write_arg_with_windows_escape(
 }
 
 ///|
-#cfg(platform="windows")
 fn test_arg(arg : String) -> String {
   StringBuilder()..write_arg_with_windows_escape(arg).to_string()
 }
@@ -61,7 +59,6 @@ fn test_arg(arg : String) -> String {
 // Cases from
 // https://learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments,
 // ported from moonbitlang/async's `write_arg_with_windows_escape` tests.
-#cfg(platform="windows")
 test "windows command line arg escape" {
   inspect(
     test_arg("a b c"),
@@ -98,7 +95,6 @@ test "windows command line arg escape" {
 }
 
 ///|
-#cfg(platform="windows")
 test "windows command line arg escape empty" {
   inspect(
     test_arg(""),
@@ -109,7 +105,6 @@ test "windows command line arg escape empty" {
 }
 
 ///|
-#cfg(platform="windows")
 test "windows command line arg escape leading quote" {
   inspect(
     test_arg("\"abcd"),

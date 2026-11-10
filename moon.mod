@@ -12,8 +12,8 @@ repository = "https://github.com/moonbit-community/pty"
 
 license = "Apache-2.0"
 
-keywords = [ "pty", "pseudo-terminal", "async", "native" ]
+keywords = [ "pty", "pseudo-terminal", "async", "native", "wasm" ]
 
-description = "Cross-platform PTY (pseudo-terminal) spawning for MoonBit native targets, integrated with moonbitlang/async."
+description = "Cross-platform PTY (pseudo-terminal) spawning for MoonBit native and wasm targets, integrated with moonbitlang/async."
 
 preferred_target = "native"

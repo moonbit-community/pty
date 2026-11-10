@@ -1,20 +1,20 @@
 import {
-  "moonbitlang/core/encoding/utf8" @encoding/utf8,
   "moonbitlang/core/env",
   "moonbitlang/async",
   "moonbitlang/async/io" @async/io,
-  "moonbitlang/async/raw_fd" @async/raw_fd,
-  "moonbitlang/async/process" @async/process,
-  "moonbitlang/async/os_error",
-  "moonbit-community/pty/internal/handle",
+  "moonbit-community/pty/internal/sidecar",
 }
 
 import {
   "moonbitlang/async/fs" @async/fs,
+  "moonbitlang/async/os_error",
+  "moonbitlang/async/process" @async/process,
 } for "test"
 
-supported_targets = "native"
+import {
+  "moonbitlang/async/pipe" @async/pipe,
+  "moonbitlang/async/process" @async/process,
+  "moonbitlang/core/string",
+} for "wbtest"
 
-options(
-  "native-stub": [ "pty.c" ],
-)
+supported_targets = "native+wasm"

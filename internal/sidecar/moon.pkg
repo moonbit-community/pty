@@ -1,0 +1,12 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/cond_var" @async/cond_var,
+  "moonbitlang/async/fs" @async/fs,
+  "moonbitlang/async/os_error",
+  "moonbitlang/async/process" @async/process,
+  "moonbitlang/core/buffer",
+  "moonbitlang/core/encoding/utf8" @encoding/utf8,
+  "moonbitlang/core/env",
+}
+
+formatter(ignore: [ "sidecars.generated.mbt" ])
