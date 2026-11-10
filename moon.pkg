@@ -13,7 +13,6 @@ import {
 
 import {
   "moonbitlang/async/pipe" @async/pipe,
-  "moonbitlang/core/string",
 } for "wbtest"
 
 supported_targets = "native+wasm"

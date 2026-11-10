@@ -3,9 +3,10 @@
 // under a tmpdir (or taken from PATH), so no platform-specific binaries need
 // to be committed.
 //
-// Tests pick their platform at run time with `@async.platform`, never with
+// Tests pick their platform at run time with `@async.platform`, not with
 // `#cfg(platform=...)`: a wasm build has no compile-time platform, so it
-// would run these on a Windows host too.
+// would run these on a Windows host too. (`#cfg` stays only where a type
+// differs per platform, see `descriptor_number` in pty_wbtest.mbt.)
 
 ///|
 // Shared with the win32 tests (same blackbox test package).

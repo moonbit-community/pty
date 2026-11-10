@@ -30,8 +30,9 @@ You can browse and install extra skills here:
   with `@async.platform`, so both the Unix and the Windows request builders
   are type-checked on every host; keep it that way. Tests do the same
   (`guard @async.platform is ... else { return }`): `#cfg(platform=...)`
-  cannot tell a wasm build which host it runs on. `sidecar.c` has a Unix
-  and a Windows half: check the Windows half compiles
+  cannot tell a wasm build which host it runs on. Keep `#cfg` for types
+  that differ per platform only (Windows' `Fd` is an opaque handle).
+  `sidecar.c` has a Unix and a Windows half: check the Windows half compiles
   (`zig cc -target x86_64-windows-gnu` works on any host) when touching
   shared parts.
 

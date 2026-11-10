@@ -63,10 +63,7 @@ async test "with_pty: sessions do not accumulate file descriptors" {
   async fn session_fd() -> Int64 {
     with_pty("true", [], pty => ignore(pty.read_all()))
     let (r, w) = @async/pipe.pipe()
-    // `fd()` is the descriptor (`Int32`) on native. On wasm it is moonrun's
-    // `UInt64` handle: a generation in the high 32 bits and a reused slot
-    // in the low 32, and the slot behaves like the lowest free descriptor.
-    let fd = @string.parse_int64(r.fd().to_string()) & 0xFFFF_FFFFL
+    let fd = descriptor_number(r)
     r.close()
     w.close()
     fd
@@ -80,4 +77,29 @@ async test "with_pty: sessions do not accumulate file descriptors" {
     }
   }
   assert_true(highest - first < 8)
+}
+
+///|
+// The descriptor number behind `r`, for the leak test above. `fd()` is the
+// descriptor (`Int32`) on native Unix. On wasm it is moonrun's `UInt64`
+// handle: a generation in the high 32 bits and a reused slot in the low 32,
+// and the slot behaves like the lowest free descriptor. Both print as
+// decimal digits.
+//
+// The one `#cfg` left in the tests, for a type rather than a behavior: on
+// Windows native `Fd` is an opaque HANDLE with no number to read, and the
+// leak test returns before calling this.
+#cfg(not(platform="windows"))
+fn descriptor_number(r : @async/pipe.PipeRead) -> Int64 {
+  let n = r
+    .fd()
+    .to_string()
+    .fold(init=0L, (n, c) => n * 10 + (c.to_int() - '0'.to_int()).to_int64())
+  n & 0xFFFF_FFFFL
+}
+
+///|
+#cfg(platform="windows")
+fn descriptor_number(_r : @async/pipe.PipeRead) -> Int64 {
+  abort("@pty test: descriptor numbers are not observable on Windows")
 }
